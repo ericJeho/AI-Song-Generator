@@ -156,15 +156,30 @@
     if (state.currentId === t.id) {
       state.playing = !state.playing;
     } else {
+      audio.pause();
       state.currentId = t.id;
       state.pos = 0;
       state.playing = true;
       if (t.audioUrl) audio.src = t.audioUrl;
       else audio.removeAttribute('src');
     }
-    if (t.audioUrl) state.playing ? audio.play() : audio.pause();
+    if (t.audioUrl) {
+      if (state.playing) audio.play().catch(() => { state.playing = false; renderLibrary(); });
+      else audio.pause();
+    }
     renderLibrary();
   }
+
+  // Real audio: use the file's true length, and stop at the end.
+  audio.addEventListener('loadedmetadata', () => {
+    const t = state.tracks.find((x) => x.id === state.currentId);
+    if (t && Number.isFinite(audio.duration)) t.duration = audio.duration;
+  });
+  audio.addEventListener('ended', () => {
+    state.playing = false;
+    state.pos = 0;
+    renderLibrary();
+  });
 
   function seek(t, e) {
     const rect = e.currentTarget.getBoundingClientRect();
@@ -195,10 +210,13 @@
       el('span', { class: 'time', text: (isCur ? fmt(state.pos) + ' / ' : '') + fmt(t.duration) })
     ]);
 
-    const actions = el('div', { class: 'actions' }, ACTIONS.map(([label, path]) => el('button', {
-      type: 'button', class: 'icon-btn', 'aria-label': label, title: label,
-      html: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + path + '</svg>'
-    })));
+    const actions = el('div', { class: 'actions' }, ACTIONS.map(([label, path]) => {
+      const icon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + path + '</svg>';
+      if (label === 'Download' && t.audioUrl) {
+        return el('a', { class: 'icon-btn', href: t.audioUrl, download: t.title + '.mp3', 'aria-label': 'Download ' + t.title, title: label, html: icon });
+      }
+      return el('button', { type: 'button', class: 'icon-btn', 'aria-label': label, title: label, html: icon });
+    }));
 
     return el('article', { class: 'card' + (isCur ? ' current' : '') }, [
       cover,
@@ -211,7 +229,7 @@
     return el('div', { class: 'card pending' }, [
       el('div', { class: 'skel', style: 'width:84px;height:84px;border-radius:14px;flex:none' }),
       el('div', { class: 'meta', style: 'gap:10px' }, [
-        el('span', { style: 'font-weight:600', text: 'Composing ' + label + '…' }),
+        el('span', { style: 'font-weight:600', text: 'Composing ' + label + '… this can take a minute or two' }),
         el('div', { class: 'skel', style: 'height:10px;width:70%' }),
         el('div', { class: 'skel', style: 'height:28px;width:100%;background:#22252C' })
       ])
@@ -273,7 +291,7 @@
     const t = state.tracks.find((x) => x.id === state.currentId);
     if (!t) return;
     state.pos = t.audioUrl ? audio.currentTime : state.pos + 0.25;
-    if (state.pos >= t.duration) {
+    if (!t.audioUrl && state.pos >= t.duration) {
       state.playing = false;
       state.pos = 0;
     }

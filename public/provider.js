@@ -2,16 +2,12 @@
 //
 // The UI calls `window.SongProvider.generate(request)` and expects a Promise
 // that resolves to an array of songs:
-//   { title, tags, duration (seconds), audioUrl (optional) }
+//   { title, tags, duration (seconds), audioUrl (or null) }
 //
-// `request` looks like:
-//   { prompt, style, genres[], mood, instruments[], lyricMode: 'auto'|'custom'|'none',
-//     lyrics, voice, tempo, length }
-//
-// The default implementation below is a mock: it waits briefly and returns two
-// silent placeholder songs. To produce real music, replace `generate` with a
-// call to your own backend, which in turn calls a music-generation API. Never
-// put API keys in this file: it is served to every visitor.
+// It posts the request to this site's own server (server.js), which holds the
+// music API key and calls the music service. When the page is opened without
+// that server (for example from GitHub Pages or straight from disk), it falls
+// back to a demo that returns silent placeholder songs.
 
 (function () {
   const STOP = ['the', 'and', 'for', 'with', 'after', 'about', 'from', 'into', 'that', 'this', 'last', 'by', 'through', 'late'];
@@ -23,7 +19,7 @@
     return words.map((w) => w[0].toUpperCase() + w.slice(1).toLowerCase()).join(' ');
   }
 
-  async function mockGenerate(req) {
+  async function demoGenerate(req) {
     await new Promise((r) => setTimeout(r, 2400));
     const tags = [];
     if (req.genres.length) tags.push(req.genres.join(' · '));
@@ -39,17 +35,22 @@
     }));
   }
 
-  // Example of a real provider, calling your own server endpoint:
-  //
-  // async function serverGenerate(req) {
-  //   const res = await fetch('/api/generate', {
-  //     method: 'POST',
-  //     headers: { 'Content-Type': 'application/json' },
-  //     body: JSON.stringify(req)
-  //   });
-  //   if (!res.ok) throw new Error('Generation failed: ' + res.status);
-  //   return res.json();
-  // }
+  async function serverGenerate(req) {
+    let res;
+    try {
+      res = await fetch('api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(req)
+      });
+    } catch {
+      return demoGenerate(req); // no server reachable (file:// or offline)
+    }
+    if (res.status === 404 || res.status === 405) return demoGenerate(req); // static hosting, no API
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error((data && data.error) || 'Generation failed (' + res.status + ').');
+    return data;
+  }
 
-  window.SongProvider = { generate: mockGenerate };
+  window.SongProvider = { generate: serverGenerate };
 })();

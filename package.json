@@ -1,0 +1,13 @@
+{
+  "name": "cadence-song-generator",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Turn a text prompt into a song, with genre, mood, instrument, lyrics, tempo and length controls.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
