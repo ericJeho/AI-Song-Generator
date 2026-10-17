@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cadence — Create a song</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg width="30" height="30" viewBox="0 0 30 30" fill="none" aria-hidden="true"><rect x="1" y="1" width="28" height="28" rx="8" stroke="currentColor" stroke-width="2"/><path d="M8 18v-6M12 21V9M16 17v-4M20 20v-9M24 16v-2" stroke="var(--accent)" stroke-width="2.2" stroke-linecap="round"/></svg>
+      <span>Cadence</span>
+    </div>
+    <nav aria-label="Main">
+      <a href="#create" class="active">Create</a>
+      <a href="#library">Library</a>
+    </nav>
+    <span class="credits"><span id="credits">50</span> credits</span>
+  </header>
+
+  <main id="create" class="layout">
+    <section class="composer" aria-labelledby="composer-h">
+      <div class="intro">
+        <h1 id="composer-h">Turn a sentence into a song.</h1>
+        <p>Describe a feeling, a story or a scene. Shape the sound below.</p>
+      </div>
+
+      <div class="field">
+        <div class="row-between">
+          <label for="prompt" class="eyebrow">Song description</label>
+          <span class="mono muted"><span id="prompt-len">0</span>/300</span>
+        </div>
+        <textarea id="prompt" maxlength="300" rows="4" placeholder="A late-night drive through Nairobi after a breakup, hopeful by the last chorus…"></textarea>
+        <div class="suggestions"><span class="muted">Try</span><span id="suggestions"></span></div>
+      </div>
+
+      <fieldset>
+        <legend class="eyebrow">Genre <span class="hint">pick up to 3</span></legend>
+        <div id="genres" class="chips"></div>
+      </fieldset>
+
+      <fieldset>
+        <legend class="eyebrow">Mood</legend>
+        <div id="moods" class="mood-grid"></div>
+      </fieldset>
+
+      <fieldset>
+        <legend class="eyebrow">Instruments</legend>
+        <div id="instruments" class="chips"></div>
+      </fieldset>
+
+      <div class="pair">
+        <fieldset>
+          <legend class="eyebrow">Lyrics</legend>
+          <div id="lyric-modes" class="segmented"></div>
+        </fieldset>
+        <fieldset id="voice-field">
+          <legend class="eyebrow">Voice</legend>
+          <div id="voices" class="segmented"></div>
+        </fieldset>
+      </div>
+
+      <div id="lyrics-field" class="field" hidden>
+        <label for="lyrics" class="eyebrow">Your lyrics</label>
+        <textarea id="lyrics" rows="5" class="mono" placeholder="[Verse]&#10;Streetlights humming my name…&#10;&#10;[Chorus]&#10;…"></textarea>
+      </div>
+
+      <div class="pair">
+        <div class="field">
+          <div class="row-between">
+            <label for="tempo" class="eyebrow">Tempo</label>
+            <span class="mono" id="tempo-label"></span>
+          </div>
+          <input id="tempo" type="range" min="60" max="180" step="2" value="104">
+        </div>
+        <fieldset>
+          <legend class="eyebrow">Length</legend>
+          <div id="lengths" class="segmented mono"></div>
+        </fieldset>
+      </div>
+
+      <div class="submit">
+        <div class="field">
+          <span class="eyebrow">Style sent to the model</span>
+          <code id="style-string"></code>
+        </div>
+        <button type="button" id="generate" class="generate">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 12h2M7 7v10M11 4v16M15 8v8M19 10v4" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+          <span id="generate-label">Generate song</span>
+        </button>
+        <span class="muted center">Creates 2 versions · uses 10 credits</span>
+      </div>
+    </section>
+
+    <section id="library" class="library" aria-labelledby="lib-h">
+      <div class="row-between">
+        <h2 id="lib-h">Your songs</h2>
+        <span class="mono muted"><span id="track-count">0</span> tracks</span>
+      </div>
+      <div id="pending" aria-live="polite"></div>
+      <div id="tracks" class="tracks"></div>
+    </section>
+  </main>
+
+  <script src="provider.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
