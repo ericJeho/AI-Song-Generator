@@ -14,7 +14,26 @@
     'Lullaby for a robot learning to dream'
   ];
   const COVERS = ['#FF9A62', '#5EC8B8', '#B69CFF', '#F2C14E', '#7DA2FF', '#F27BA6'];
-  const COST = 10;
+  const STORAGE_KEY = 'cadence.library.v1';
+  const SETTINGS = ['prompt', 'genres', 'mood', 'instruments', 'lyricMode', 'voice', 'lyrics', 'tempo', 'length'];
+
+  // The song list is kept in this browser only, so visitors never see each other's songs.
+  function loadLibrary() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+      return Array.isArray(saved) ? saved.filter((t) => t && t.id && t.title) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function saveLibrary() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state.tracks));
+    } catch {
+      // Storage full or blocked: the list still works until the page is closed.
+    }
+  }
 
   const state = {
     prompt: 'A late-night drive through Nairobi after a breakup, hopeful by the last chorus',
@@ -26,17 +45,13 @@
     lyrics: '',
     tempo: 104,
     length: 180,
-    credits: 50,
     generating: false,
+    versions: 2,
     newIds: [],
     currentId: null,
     playing: false,
     pos: 0,
-    tracks: [
-      { id: 't3', title: 'Neon Over Westlands', tags: 'Afrobeats · R&B · Bittersweet · 104 BPM', duration: 178, cover: COVERS[0], seed: 7 },
-      { id: 't2', title: 'Saltwater Letters', tags: 'Folk · Melancholic · 82 BPM', duration: 154, cover: COVERS[1], seed: 19 },
-      { id: 't1', title: 'Rooftop Static', tags: 'Lo-fi · House · Chill · 120 BPM · Instrumental', duration: 203, cover: COVERS[2], seed: 31 }
-    ]
+    tracks: loadLibrary()
   };
 
   const $ = (id) => document.getElementById(id);
@@ -129,12 +144,12 @@
     $('tempo-label').textContent = state.tempo + ' BPM · ' + word;
     $('prompt-len').textContent = state.prompt.length;
     $('style-string').textContent = styleString();
-    $('credits').textContent = state.credits;
+    $('lyrics').value = state.lyrics;
 
     const btn = $('generate');
-    btn.disabled = state.generating || !state.prompt.trim() || state.credits < COST;
+    btn.disabled = state.generating || !state.prompt.trim() || (state.lyricMode === 'custom' && !state.lyrics.trim());
     btn.classList.toggle('busy', state.generating);
-    $('generate-label').textContent = state.generating ? 'Composing…' : state.credits < COST ? 'Out of credits' : 'Generate song';
+    $('generate-label').textContent = state.generating ? 'Composing…' : 'Generate song';
   }
 
   // ---------- Library ----------
@@ -142,11 +157,35 @@
   const PLAY_SVG = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9.5-5.5z" fill="currentColor"/></svg>';
   const PAUSE_SVG = '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="2" width="3.5" height="12" rx="1" fill="currentColor"/><rect x="9.5" y="2" width="3.5" height="12" rx="1" fill="currentColor"/></svg>';
   const COVER_SVG = '<svg width="84" height="84" viewBox="0 0 84 84" fill="none" aria-hidden="true"><circle cx="62" cy="22" r="30" stroke="#0E0F12" stroke-opacity=".22" stroke-width="2"/><circle cx="62" cy="22" r="18" stroke="#0E0F12" stroke-opacity=".22" stroke-width="2"/><circle cx="62" cy="22" r="6" fill="#0E0F12" fill-opacity=".3"/></svg>';
-  const ACTIONS = [
-    ['Extend this song', '<path d="M4 12h12M12 6l6 6-6 6M20 5v14"/>'],
-    ['Remix with new style', '<path d="M4 7h11l-3-3M20 17H9l3 3M18 7a4 4 0 0 1 2 3.5M6 17a4 4 0 0 1-2-3.5"/>'],
-    ['Download', '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>']
-  ];
+  function icon(path) {
+    return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + path + '</svg>';
+  }
+  const REMIX_ICON = icon('<path d="M4 7h11l-3-3M20 17H9l3 3M18 7a4 4 0 0 1 2 3.5M6 17a4 4 0 0 1-2-3.5"/>');
+  const DOWNLOAD_ICON = icon('<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>');
+  const DELETE_ICON = icon('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>');
+
+  // Load a song's settings back into the composer so it can be tweaked and regenerated.
+  function remix(t) {
+    if (!t.request) return;
+    SETTINGS.forEach((k) => { if (t.request[k] !== undefined) state[k] = Array.isArray(t.request[k]) ? t.request[k].slice() : t.request[k]; });
+    $('prompt').value = state.prompt;
+    $('tempo').value = state.tempo;
+    renderComposer();
+    $('create').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    $('prompt').focus({ preventScroll: true });
+  }
+
+  function removeTrack(t) {
+    if (!confirm('Remove “' + t.title + '” from your songs?')) return;
+    if (state.currentId === t.id) {
+      audio.pause();
+      state.currentId = null;
+      state.playing = false;
+    }
+    state.tracks = state.tracks.filter((x) => x.id !== t.id);
+    saveLibrary();
+    renderLibrary();
+  }
 
   function initials(title) {
     return title.split(' ').filter((w) => /[A-Za-z]/.test(w[0])).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
@@ -210,13 +249,14 @@
       el('span', { class: 'time', text: (isCur ? fmt(state.pos) + ' / ' : '') + fmt(t.duration) })
     ]);
 
-    const actions = el('div', { class: 'actions' }, ACTIONS.map(([label, path]) => {
-      const icon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + path + '</svg>';
-      if (label === 'Download' && t.audioUrl) {
-        return el('a', { class: 'icon-btn', href: t.audioUrl, download: t.title + '.mp3', 'aria-label': 'Download ' + t.title, title: label, html: icon });
-      }
-      return el('button', { type: 'button', class: 'icon-btn', 'aria-label': label, title: label, html: icon });
-    }));
+    const actions = el('div', { class: 'actions' });
+    if (t.request) {
+      actions.append(el('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Remix: load these settings', title: 'Remix', html: REMIX_ICON, onclick: () => remix(t) }));
+    }
+    if (t.audioUrl) {
+      actions.append(el('a', { class: 'icon-btn', href: t.audioUrl, download: t.title + '.mp3', 'aria-label': 'Download ' + t.title, title: 'Download', html: DOWNLOAD_ICON }));
+    }
+    actions.append(el('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Remove ' + t.title, title: 'Remove', html: DELETE_ICON, onclick: () => removeTrack(t) }));
 
     return el('article', { class: 'card' + (isCur ? ' current' : '') }, [
       cover,
@@ -237,44 +277,49 @@
   }
 
   function renderLibrary() {
-    $('pending').replaceChildren(...(state.generating ? [pendingCard('version A'), pendingCard('version B')] : []));
+    const pending = state.generating ? 'ABCD'.slice(0, state.versions).split('').map((l) => pendingCard('version ' + l)) : [];
+    $('pending').replaceChildren(...pending);
     $('tracks').replaceChildren(...state.tracks.map(trackCard));
     $('track-count').textContent = state.tracks.length;
+    $('empty').hidden = state.generating || state.tracks.length > 0;
   }
 
   // ---------- Generate ----------
 
   async function generate() {
-    if (state.generating || !state.prompt.trim() || state.credits < COST) return;
+    if ($('generate').disabled) return;
     state.generating = true;
     renderComposer();
     renderLibrary();
+    const request = {
+      prompt: state.prompt.trim(),
+      style: styleString(),
+      genres: state.genres.slice(),
+      mood: state.mood,
+      instruments: state.instruments.slice(),
+      lyricMode: state.lyricMode,
+      lyrics: state.lyricMode === 'custom' ? state.lyrics : '',
+      voice: state.lyricMode === 'none' ? null : state.voice,
+      tempo: state.tempo,
+      length: state.length
+    };
     try {
-      const songs = await window.SongProvider.generate({
-        prompt: state.prompt.trim(),
-        style: styleString(),
-        genres: state.genres.slice(),
-        mood: state.mood,
-        instruments: state.instruments.slice(),
-        lyricMode: state.lyricMode,
-        lyrics: state.lyricMode === 'custom' ? state.lyrics : '',
-        voice: state.lyricMode === 'none' ? null : state.voice,
-        tempo: state.tempo,
-        length: state.length
-      });
+      const songs = await window.SongProvider.generate(request);
       const now = Date.now();
       const made = songs.map((s, k) => ({
         id: 'g' + now + k,
         title: s.title,
-        tags: s.tags,
+        tags: s.audioUrl ? s.tags : s.tags + ' · Demo (silent)',
         duration: s.duration,
         audioUrl: s.audioUrl || null,
         cover: COVERS[(state.tracks.length + k) % COVERS.length],
-        seed: (now % 1000) + k * 13
+        seed: (now % 1000) + k * 13,
+        createdAt: new Date(now).toISOString(),
+        request: request
       }));
       state.tracks = made.concat(state.tracks);
       state.newIds = made.map((m) => m.id);
-      state.credits -= COST;
+      saveLibrary();
     } catch (err) {
       alert(err.message || 'Something went wrong while generating.');
     } finally {
@@ -307,10 +352,21 @@
 
   $('prompt').value = state.prompt;
   $('prompt').addEventListener('input', (e) => { state.prompt = e.target.value.slice(0, 300); renderComposer(); });
-  $('lyrics').addEventListener('input', (e) => { state.lyrics = e.target.value; });
+  $('lyrics').addEventListener('input', (e) => { state.lyrics = e.target.value.slice(0, 3000); renderComposer(); });
   $('tempo').value = state.tempo;
   $('tempo').addEventListener('input', (e) => { state.tempo = Number(e.target.value); renderComposer(); });
   $('generate').addEventListener('click', generate);
+
+  // Ask the server how many versions each click makes; without a server, the demo makes 2.
+  fetch('api/health')
+    .then((r) => (r.ok ? r.json() : null))
+    .then((h) => {
+      if (!h) return;
+      state.versions = h.versionsPerRequest || state.versions;
+      $('versions-note').textContent = 'Creates ' + state.versions + (state.versions === 1 ? ' version' : ' versions') +
+        (h.provider === 'mock' ? ' · demo mode, songs are silent' : '');
+    })
+    .catch(() => {});
 
   renderComposer();
   renderLibrary();

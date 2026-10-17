@@ -5,7 +5,8 @@
   "description": "Turn a text prompt into a song, with genre, mood, instrument, lyrics, tempo and length controls.",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test"
   },
   "engines": {
     "node": ">=18"

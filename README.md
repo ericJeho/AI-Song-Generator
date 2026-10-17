@@ -8,7 +8,9 @@ Turn a short text prompt into a full song, with controls for:
 - **Lyrics**: AI-written, your own lyrics, or instrumental; female, male or duet vocals
 - **Tempo** (60–180 BPM) and **length** (1–4 minutes)
 
-Songs are generated with the [ElevenLabs Music API](https://elevenlabs.io/docs/api-reference/music/compose). Each click makes two versions, which appear in the song list where they can be played and downloaded as MP3.
+Songs are generated with the [ElevenLabs Music API](https://elevenlabs.io/docs/api-reference/music/compose). Each click makes two versions, which appear in the song list where they can be played, downloaded as MP3, removed, or **remixed** (loads that song's settings back into the composer to tweak and regenerate).
+
+Each visitor's song list is saved in their own browser, so visitors never see each other's songs. The MP3s live on the server under unguessable links.
 
 ## Run it
 
@@ -28,6 +30,14 @@ Without a key, the app runs in **demo mode**: everything works, but songs are si
 3. Paste it into `.env` as `ELEVENLABS_API_KEY=…`.
 
 Each song is one paid API call, so one click costs two songs by default. Lower `VERSIONS_PER_REQUEST` in `.env` to 1 to halve that. `RATE_LIMIT_PER_HOUR` caps how many generate requests each visitor can make (default 20).
+
+## Tests
+
+```sh
+npm test
+```
+
+Starts the server against a local stand-in for the ElevenLabs API and checks the request sent to it, audio serving, input validation, file-path safety, error messages, demo mode and the rate limit. GitHub Actions runs them on every push.
 
 ## How it works
 
@@ -62,7 +72,8 @@ GitHub Pages only serves static files, so it can show the demo but cannot genera
 | `providers/mock.js` | Demo mode when no key is set |
 | `public/index.html` | Page structure |
 | `public/styles.css` | Visual design (colours and fonts are CSS variables in `:root`) |
-| `public/app.js` | Composer controls, song list, playback, download |
+| `public/app.js` | Composer controls, song list (saved in the browser), playback, remix, download |
 | `public/provider.js` | Browser side of generation; falls back to demo mode without the server |
 | `.env.example` | Settings template |
 | `render.yaml` | One-click deploy to Render |
+| `test/server.test.js` | Server tests (`npm test`) |

@@ -37,7 +37,6 @@ legend { padding: 0; margin-bottom: 12px; }
 .topbar nav { display: flex; gap: 4px; }
 .topbar nav a { color: var(--text-2); text-decoration: none; padding: 10px 14px; border-radius: 10px; }
 .topbar nav a.active { color: var(--text); background: #1C1F25; font-weight: 600; }
-.credits { margin-left: auto; font: 13px var(--mono); color: #CFCDC6; padding: 8px 12px; border: 1px solid var(--line-hi); border-radius: 999px; }
 
 .layout { max-width: 1360px; margin: 0 auto; padding: 36px clamp(16px, 4vw, 48px) 64px; display: flex; flex-wrap: wrap; gap: 32px; align-items: flex-start; }
 .composer { flex: 1 1 460px; min-width: 0; display: flex; flex-direction: column; gap: 28px; background: var(--surface); border: 1px solid var(--line); border-radius: 22px; padding: clamp(20px, 3vw, 32px); }
@@ -101,6 +100,10 @@ input[type=range] { width: 100%; height: 44px; margin: 0; accent-color: var(--ac
 .time { flex: none; font: 12px var(--mono); color: var(--text-2); }
 .actions { display: flex; gap: 4px; margin-left: auto; }
 .icon-btn { box-sizing: border-box; text-decoration: none; width: 44px; height: 44px; border-radius: 12px; border: 1px solid var(--line-hi); background: transparent; color: #CFCDC6; display: flex; align-items: center; justify-content: center; }
+
+.empty { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 56px 24px; border: 1px dashed #3A3D46; border-radius: 18px; color: var(--text-2); text-align: center; }
+.empty p { margin: 0; max-width: 34ch; }
+.empty strong { color: var(--text); }
 
 .skel { background: #2A2D35; border-radius: 6px; animation: pulse 1.2s ease-in-out infinite; }
 @keyframes pulse { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
