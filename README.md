@@ -43,7 +43,11 @@ browser (public/)  ──POST /api/generate──▶  server.js  ──▶  Elev
 
 ## Deploying
 
-GitHub Pages only serves static files, so it can show the demo but cannot generate real songs. To go live, deploy the whole repository to a Node host such as Render, Railway or Fly.io:
+GitHub Pages only serves static files, so it can show the demo but cannot generate real songs. To go live, deploy the whole repository to a Node host.
+
+**Render (set up in this repo):** in the Render dashboard choose **New › Blueprint**, pick this repository, and paste your ElevenLabs key when asked. `render.yaml` creates the web service, a health check and a 1 GB disk so songs survive redeploys (disks need a paid instance).
+
+**Any other Node host** (Railway, Fly.io, a VPS):
 
 - Start command: `npm start`
 - Environment variable: `ELEVENLABS_API_KEY`
@@ -61,3 +65,4 @@ GitHub Pages only serves static files, so it can show the demo but cannot genera
 | `public/app.js` | Composer controls, song list, playback, download |
 | `public/provider.js` | Browser side of generation; falls back to demo mode without the server |
 | `.env.example` | Settings template |
+| `render.yaml` | One-click deploy to Render |
