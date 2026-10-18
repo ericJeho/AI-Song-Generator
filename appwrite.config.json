@@ -1,7 +1,7 @@
 {
-    "projectId": "<YOUR_APPWRITE_PROJECT_ID>",
-    "projectName": "Cadence",
-    "endpoint": "https://<REGION>.cloud.appwrite.io/v1",
+    "projectId": "6ad203f20004df1e2533",
+    "projectName": "My first project",
+    "endpoint": "https://fra.cloud.appwrite.io/v1",
     "sites": [
         {
             "$id": "cadence",

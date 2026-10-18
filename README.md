@@ -9,6 +9,8 @@ Turn a short text prompt into a full song, with controls for:
 - **Lyrics helper**: "Draft from my description" writes editable lyrics with Claude
 - **Tempo** (60–180 BPM) and **length** (1–4 minutes)
 
+**Live at https://cadence-songs.appwrite.network**
+
 Songs are made with **ElevenLabs Music** or **MiniMax Music**. Each click makes two versions, which can be played, downloaded as MP3, removed, or **remixed** (loads a song's settings back into the composer). Visitors sign in, need an invite code, and have a daily song limit, so strangers can't spend your API balance.
 
 ## How it's built
@@ -56,14 +58,15 @@ Supabase dashboard → **Edge Functions → Secrets**:
 | `ALLOWED_ORIGIN` | Your Appwrite site's address (e.g. `https://cadence.appwrite.network`), so only your site can call the function from a browser. |
 | `DAILY_SONGS_PER_USER`, `DAILY_LYRICS_PER_USER`, `VERSIONS_PER_REQUEST` | Optional limits (defaults 10, 20, 2). |
 
-### 2. Publish the page on Appwrite Sites
+### 2. The page on Appwrite Sites
 
-Either connect the GitHub repository in the Appwrite Console (**Sites → Create site → Connect a repository**, root directory `public`, framework *Other*, no install or build command, output directory `./`), or use the CLI:
+Deployed to the site `cadence` in the Appwrite project "My first project" (`6ad203f20004df1e2533`, Frankfurt), served at https://cadence-songs.appwrite.network. The current deployment was uploaded from GitHub's archive of `main`, so the site's output directory is `./AI-Song-Generator-main/public`.
+
+To publish changes, either upload a new archive of `main` in the Appwrite Console (Sites → Cadence → Deployments), or use the CLI, which packages `public/` directly using `appwrite.config.json`:
 
 ```sh
 npm install -g appwrite-cli
 appwrite login
-# put your Appwrite project ID and endpoint into appwrite.config.json
 appwrite push sites --all
 ```
 
