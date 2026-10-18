@@ -1,7 +1,7 @@
-// Cadence server: serves the web app from public/ and generates songs through
-// a music-generation provider, keeping the API key on the server.
+// Cadence server: serves the web app from public/, handles accounts, and generates
+// songs (and optional lyric drafts) while keeping every API key on the server.
 //
-// No dependencies. Requires Node 18+ (uses the built-in fetch).
+// Requires Node 18+.
 
 const http = require('http');
 const fs = require('fs');
@@ -10,15 +10,28 @@ const crypto = require('crypto');
 
 loadDotEnv(path.join(__dirname, '.env'));
 
+const { createAuth } = require('./lib/auth');
+
 const PORT = Number(process.env.PORT) || 8000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const AUDIO_DIR = path.resolve(process.env.AUDIO_DIR || path.join(__dirname, 'generated'));
+const DATA_DIR = path.resolve(process.env.DATA_DIR || path.join(__dirname, 'data'));
+const AUDIO_DIR = path.resolve(process.env.AUDIO_DIR || path.join(DATA_DIR, 'generated'));
 const VERSIONS = clampInt(process.env.VERSIONS_PER_REQUEST, 1, 4, 2);
 const RATE_LIMIT_PER_HOUR = clampInt(process.env.RATE_LIMIT_PER_HOUR, 1, 10000, 20);
+const REQUIRE_LOGIN = process.env.REQUIRE_LOGIN !== 'false';
 
-const provider = process.env.ELEVENLABS_API_KEY
-  ? require('./providers/elevenlabs')
-  : require('./providers/mock');
+const provider = pickProvider();
+const lyricsHelper = process.env.ANTHROPIC_API_KEY ? require('./providers/lyrics') : null;
+
+const auth = createAuth({
+  dataDir: DATA_DIR,
+  sessionSecret: process.env.SESSION_SECRET,
+  limits: {
+    signupCode: (process.env.SIGNUP_CODE || '').trim() || null,
+    songsPerDay: clampInt(process.env.DAILY_SONGS_PER_USER, 0, 100000, 10),
+    lyricsPerDay: clampInt(process.env.DAILY_LYRICS_PER_USER, 0, 100000, 20)
+  }
+});
 
 fs.mkdirSync(AUDIO_DIR, { recursive: true });
 
@@ -54,19 +67,43 @@ function clampInt(value, min, max, fallback) {
   return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
 }
 
-function sendJson(res, status, body) {
-  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+// MUSIC_PROVIDER picks one explicitly; otherwise the first service with a key is used.
+function pickProvider() {
+  const choice = (process.env.MUSIC_PROVIDER || '').toLowerCase();
+  if (choice === 'mock') return require('./providers/mock');
+  if (choice === 'minimax' || (!choice && !process.env.ELEVENLABS_API_KEY && process.env.MINIMAX_API_KEY)) {
+    if (!process.env.MINIMAX_API_KEY) throw new Error('MUSIC_PROVIDER=minimax needs MINIMAX_API_KEY');
+    return require('./providers/minimax');
+  }
+  if (choice === 'elevenlabs' || process.env.ELEVENLABS_API_KEY) {
+    if (!process.env.ELEVENLABS_API_KEY) throw new Error('MUSIC_PROVIDER=elevenlabs needs ELEVENLABS_API_KEY');
+    return require('./providers/elevenlabs');
+  }
+  return require('./providers/mock');
+}
+
+function fail(status, message) {
+  return Object.assign(new Error(message), { status });
+}
+
+function sendJson(res, status, body, headers) {
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...headers });
   res.end(JSON.stringify(body));
 }
 
+// POST bodies must be JSON. Browsers cannot send that cross-site without a CORS
+// preflight this server never approves, which blocks forged requests (CSRF).
 function readJsonBody(req, limitBytes) {
+  if (!/^application\/json\b/i.test(req.headers['content-type'] || '')) {
+    return Promise.reject(fail(415, 'Send JSON with Content-Type: application/json'));
+  }
   return new Promise((resolve, reject) => {
     let size = 0;
     const chunks = [];
     req.on('data', (c) => {
       size += c.length;
       if (size > limitBytes) {
-        reject(Object.assign(new Error('Request body too large'), { status: 413 }));
+        reject(fail(413, 'Request body too large'));
         req.destroy();
       } else chunks.push(c);
     });
@@ -74,25 +111,30 @@ function readJsonBody(req, limitBytes) {
       try {
         resolve(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}'));
       } catch {
-        reject(Object.assign(new Error('Invalid JSON'), { status: 400 }));
+        reject(fail(400, 'Invalid JSON'));
       }
     });
     req.on('error', reject);
   });
 }
 
-// Simple in-memory limit per client IP, to protect the API key's budget.
+function clientIp(req) {
+  return req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket.remoteAddress;
+}
+
+// Simple in-memory sliding-window limits per key (client IP plus a bucket name).
 const hits = new Map();
-function rateLimited(ip) {
+function rateLimited(key, max, windowMs) {
   const now = Date.now();
-  const recent = (hits.get(ip) || []).filter((t) => now - t < 3600e3);
-  if (recent.length >= RATE_LIMIT_PER_HOUR) {
-    hits.set(ip, recent);
-    return true;
-  }
-  recent.push(now);
-  hits.set(ip, recent);
-  return false;
+  const recent = (hits.get(key) || []).filter((t) => now - t < windowMs);
+  const limited = recent.length >= max;
+  if (!limited) recent.push(now);
+  hits.set(key, recent);
+  return limited;
+}
+
+function isHttps(req) {
+  return req.headers['x-forwarded-proto'] === 'https' || Boolean(req.socket.encrypted);
 }
 
 // ---------- Request validation ----------
@@ -102,12 +144,12 @@ function pickList(value, allowed, max) {
   return [...new Set(value.filter((v) => allowed.includes(v)))].slice(0, max);
 }
 
-function validate(body) {
+function validate(body, { needLyrics = true } = {}) {
   const prompt = String(body.prompt || '').trim().slice(0, 300);
-  if (!prompt) throw Object.assign(new Error('Describe your song first.'), { status: 400 });
+  if (!prompt) throw fail(400, 'Describe your song first.');
   const lyricMode = LYRIC_MODES.includes(body.lyricMode) ? body.lyricMode : 'auto';
   const lyrics = lyricMode === 'custom' ? String(body.lyrics || '').trim().slice(0, 3000) : '';
-  if (lyricMode === 'custom' && !lyrics) throw Object.assign(new Error('Add your lyrics, or pick another lyrics option.'), { status: 400 });
+  if (needLyrics && lyricMode === 'custom' && !lyrics) throw fail(400, 'Add your lyrics, or pick another lyrics option.');
   return {
     prompt,
     genres: pickList(body.genres, GENRES, 3),
@@ -140,15 +182,36 @@ function tagsFor(req) {
 
 // ---------- Handlers ----------
 
-async function handleGenerate(req, res) {
-  const ip = req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket.remoteAddress;
-  if (rateLimited(ip)) return sendJson(res, 429, { error: 'Too many songs this hour. Try again later.' });
+// Returns the signed-in user, or null when sign-in is turned off. Throws 401 otherwise.
+function requireUser(req) {
+  const user = auth.userFromRequest(req);
+  if (!user && REQUIRE_LOGIN) throw fail(401, 'Sign in to continue.');
+  return user;
+}
 
+async function handleSignup(req, res) {
+  if (rateLimited('auth:' + clientIp(req), 10, 15 * 60e3)) throw fail(429, 'Too many attempts. Wait a few minutes.');
+  const user = auth.signup(await readJsonBody(req, 4 * 1024));
+  sendJson(res, 200, { user: auth.publicUser(user) }, { 'Set-Cookie': auth.sessionCookie(user.id, isHttps(req)) });
+}
+
+async function handleLogin(req, res) {
+  if (rateLimited('auth:' + clientIp(req), 10, 15 * 60e3)) throw fail(429, 'Too many attempts. Wait a few minutes.');
+  const user = auth.login(await readJsonBody(req, 4 * 1024));
+  sendJson(res, 200, { user: auth.publicUser(user) }, { 'Set-Cookie': auth.sessionCookie(user.id, isHttps(req)) });
+}
+
+async function handleGenerate(req, res) {
+  const user = requireUser(req);
+  if (rateLimited('gen:' + clientIp(req), RATE_LIMIT_PER_HOUR, 3600e3)) throw fail(429, 'Too many songs this hour. Try again later.');
   const request = validate(await readJsonBody(req, 16 * 1024));
+
+  const allowed = user ? Math.min(VERSIONS, auth.remaining(user, 'songs')) : VERSIONS;
+  if (allowed < 1) throw fail(429, 'You have used today’s songs. Come back tomorrow.');
+
   const base = titleFrom(request.prompt);
   const labels = ['', ' (Alt Take)', ' (Take 3)', ' (Take 4)'];
-
-  const results = await Promise.allSettled(Array.from({ length: VERSIONS }, async (_, k) => {
+  const results = await Promise.allSettled(Array.from({ length: allowed }, async (_, k) => {
     const { audio, extension } = await provider.generate(request);
     let audioUrl = null;
     if (audio) {
@@ -163,9 +226,28 @@ async function handleGenerate(req, res) {
   if (!songs.length) {
     const err = results[0].reason;
     console.error('Generation failed:', err);
-    return sendJson(res, err.status === 400 ? 400 : 502, { error: err.publicMessage || 'The music service failed to create a song. Try again.' });
+    return sendJson(res, 502, { error: err.publicMessage || 'The music service failed to create a song. Try again.' });
   }
-  sendJson(res, 200, songs);
+  // Only songs that were actually made count toward the daily limit.
+  if (user && provider.name !== 'mock') auth.charge(user, 'songs', songs.length);
+  sendJson(res, 200, { songs, user: user ? auth.publicUser(user) : null });
+}
+
+async function handleLyrics(req, res) {
+  if (!lyricsHelper) throw fail(404, 'The lyrics helper is not set up on this server.');
+  const user = requireUser(req);
+  if (rateLimited('lyrics:' + clientIp(req), RATE_LIMIT_PER_HOUR * 2, 3600e3)) throw fail(429, 'Too many drafts this hour. Try again later.');
+  if (user && auth.remaining(user, 'lyrics') < 1) throw fail(429, 'You have used today’s lyric drafts. Come back tomorrow.');
+  const request = validate(await readJsonBody(req, 16 * 1024), { needLyrics: false });
+  if (request.lyricMode === 'none') request.voice = 'Female';
+  try {
+    const lyrics = await lyricsHelper.draftLyrics(request);
+    if (user) auth.charge(user, 'lyrics', 1);
+    sendJson(res, 200, { lyrics, user: user ? auth.publicUser(user) : null });
+  } catch (err) {
+    console.error('Lyrics failed:', err);
+    sendJson(res, err.status === 400 ? 400 : 502, { error: err.publicMessage || 'The lyrics helper failed. Try again.' });
+  }
 }
 
 function serveFile(res, filePath, extraHeaders) {
@@ -174,6 +256,7 @@ function serveFile(res, filePath, extraHeaders) {
     res.writeHead(200, {
       'Content-Type': MIME[path.extname(filePath)] || 'application/octet-stream',
       'Content-Length': stat.size,
+      'X-Content-Type-Options': 'nosniff',
       ...extraHeaders
     });
     fs.createReadStream(filePath).pipe(res);
@@ -182,23 +265,45 @@ function serveFile(res, filePath, extraHeaders) {
 
 // Resolve a URL path inside a root directory, refusing anything that escapes it.
 function safeJoin(root, urlPath) {
-  const resolved = path.resolve(root, '.' + path.posix.normalize('/' + decodeURIComponent(urlPath)));
+  let decoded;
+  try {
+    decoded = decodeURIComponent(urlPath);
+  } catch {
+    return null;
+  }
+  const resolved = path.resolve(root, '.' + path.posix.normalize('/' + decoded));
   return resolved.startsWith(root + path.sep) || resolved === root ? resolved : null;
 }
+
+const routes = {
+  'GET /api/health': (req, res) => sendJson(res, 200, {
+    ok: true,
+    provider: provider.name,
+    versionsPerRequest: VERSIONS,
+    requireLogin: REQUIRE_LOGIN,
+    signupCodeRequired: Boolean((process.env.SIGNUP_CODE || '').trim()),
+    lyricsHelper: Boolean(lyricsHelper)
+  }),
+  'GET /api/me': (req, res) => {
+    const user = auth.userFromRequest(req);
+    sendJson(res, 200, { user: user ? auth.publicUser(user) : null });
+  },
+  'POST /api/signup': handleSignup,
+  'POST /api/login': handleLogin,
+  'POST /api/logout': (req, res) => sendJson(res, 200, { ok: true }, { 'Set-Cookie': auth.clearCookie() }),
+  'POST /api/generate': handleGenerate,
+  'POST /api/lyrics': handleLyrics
+};
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   try {
-    if (url.pathname === '/api/health' && req.method === 'GET') {
-      return sendJson(res, 200, { ok: true, provider: provider.name, versionsPerRequest: VERSIONS });
-    }
-    if (url.pathname === '/api/generate') {
-      if (req.method !== 'POST') return sendJson(res, 405, { error: 'Use POST' });
-      return await handleGenerate(req, res);
-    }
+    const route = routes[req.method + ' ' + url.pathname];
+    if (route) return await route(req, res);
+    if (url.pathname.startsWith('/api/')) return sendJson(res, 404, { error: 'Not found' });
     if (url.pathname.startsWith('/audio/') && req.method === 'GET') {
       const file = safeJoin(AUDIO_DIR, url.pathname.slice('/audio/'.length));
-      return file ? serveFile(res, file, { 'Cache-Control': 'public, max-age=31536000, immutable' }) : sendJson(res, 404, { error: 'Not found' });
+      return file ? serveFile(res, file, { 'Cache-Control': 'private, max-age=31536000, immutable' }) : sendJson(res, 404, { error: 'Not found' });
     }
     if (req.method === 'GET' || req.method === 'HEAD') {
       const file = safeJoin(PUBLIC_DIR, url.pathname === '/' ? 'index.html' : url.pathname);
@@ -212,6 +317,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Cadence running at http://localhost:${PORT} (provider: ${provider.name}, ${VERSIONS} version(s) per request)`);
-  if (provider.name === 'mock') console.log('No ELEVENLABS_API_KEY set: songs will be silent placeholders.');
+  console.log(`Cadence running at http://localhost:${PORT} (music: ${provider.name}, lyrics helper: ${lyricsHelper ? 'on' : 'off'}, sign-in: ${REQUIRE_LOGIN ? 'required' : 'off'})`);
+  if (provider.name === 'mock') console.log('No music API key set: songs will be silent placeholders.');
+  if (REQUIRE_LOGIN && !process.env.SIGNUP_CODE) console.log('Warning: anyone can create an account. Set SIGNUP_CODE to limit sign-ups.');
 });

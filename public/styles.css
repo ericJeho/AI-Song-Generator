@@ -101,6 +101,19 @@ input[type=range] { width: 100%; height: 44px; margin: 0; accent-color: var(--ac
 .actions { display: flex; gap: 4px; margin-left: auto; }
 .icon-btn { box-sizing: border-box; text-decoration: none; width: 44px; height: 44px; border-radius: 12px; border: 1px solid var(--line-hi); background: transparent; color: #CFCDC6; display: flex; align-items: center; justify-content: center; }
 
+.account { margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.account-status { font: 13px var(--mono); color: #CFCDC6; }
+.btn-outline { min-height: 44px; padding: 8px 16px; border-radius: 12px; border: 1px solid var(--line-hi); background: transparent; color: var(--text); font-weight: 600; }
+.btn-outline.small { min-height: 36px; padding: 6px 12px; font-size: 13px; }
+.btn-outline:disabled { opacity: .5; cursor: progress; }
+.form-error { margin: 0; color: #FFB3A1; font-size: 14px; }
+
+dialog { width: min(420px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--line); border-radius: 20px; background: var(--surface); color: var(--text); }
+dialog::backdrop { background: rgba(5, 6, 8, .7); }
+dialog form { display: flex; flex-direction: column; gap: 18px; padding: 24px; }
+dialog h2 { font-size: 24px; }
+dialog input { width: 100%; min-height: 44px; background: var(--ground); color: var(--text); border: 1px solid var(--line-hi); border-radius: 12px; padding: 10px 14px; font: inherit; }
+
 .empty { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 56px 24px; border: 1px dashed #3A3D46; border-radius: 18px; color: var(--text-2); text-align: center; }
 .empty p { margin: 0; max-width: 34ch; }
 .empty strong { color: var(--text); }

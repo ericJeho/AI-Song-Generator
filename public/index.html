@@ -18,7 +18,42 @@
       <a href="#create" class="active">Create</a>
       <a href="#library">Library</a>
     </nav>
+    <div class="account" id="account" hidden>
+      <span id="account-status" class="account-status"></span>
+      <button type="button" id="sign-in-btn" class="btn-outline">Sign in</button>
+      <button type="button" id="sign-out-btn" class="btn-outline" hidden>Sign out</button>
+    </div>
   </header>
+
+  <dialog id="auth-dialog" aria-labelledby="auth-title">
+    <form id="auth-form" method="dialog" novalidate>
+      <div class="row-between">
+        <h2 id="auth-title">Sign in</h2>
+        <button type="button" id="auth-close" class="icon-btn" aria-label="Close">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <div class="segmented" role="group" aria-label="Account">
+        <button type="button" id="mode-signin" aria-pressed="true">Sign in</button>
+        <button type="button" id="mode-signup" aria-pressed="false">Create account</button>
+      </div>
+      <div class="field">
+        <label for="auth-email" class="eyebrow">Email</label>
+        <input id="auth-email" type="email" autocomplete="email" required>
+      </div>
+      <div class="field">
+        <label for="auth-password" class="eyebrow">Password</label>
+        <input id="auth-password" type="password" autocomplete="current-password" minlength="8" required>
+        <span class="muted" id="password-hint" hidden>At least 8 characters.</span>
+      </div>
+      <div class="field" id="invite-field" hidden>
+        <label for="auth-invite" class="eyebrow">Invite code</label>
+        <input id="auth-invite" type="text" autocomplete="off">
+      </div>
+      <p id="auth-error" class="form-error" role="alert" hidden></p>
+      <button type="submit" id="auth-submit" class="generate">Sign in</button>
+    </form>
+  </dialog>
 
   <main id="create" class="layout">
     <section class="composer" aria-labelledby="composer-h">
@@ -63,7 +98,11 @@
       </div>
 
       <div id="lyrics-field" class="field" hidden>
-        <label for="lyrics" class="eyebrow">Your lyrics</label>
+        <div class="row-between">
+          <label for="lyrics" class="eyebrow">Your lyrics</label>
+          <button type="button" id="draft-lyrics" class="btn-outline small" hidden>Draft from my description</button>
+        </div>
+        <p id="lyrics-error" class="form-error" role="alert" hidden></p>
         <textarea id="lyrics" rows="5" class="mono" placeholder="[Verse]&#10;Streetlights humming my name…&#10;&#10;[Chorus]&#10;…"></textarea>
       </div>
 

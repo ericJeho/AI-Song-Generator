@@ -5,31 +5,50 @@ Turn a short text prompt into a full song, with controls for:
 - **Genre**: up to 3 of 12 (Pop, Hip-Hop, Afrobeats, Amapiano, R&B, Lo-fi, House, Rock, Jazz, Synthwave, Folk, Cinematic)
 - **Mood**: Euphoric, Bittersweet, Chill, Melancholic, Dark, Romantic, Energetic, Dreamy
 - **Instruments**: piano, guitars, 808s, synth pads, strings, saxophone, talking drum, bass, brass
-- **Lyrics**: AI-written, your own lyrics, or instrumental; female, male or duet vocals
+- **Lyrics**: AI-written by the music model, your own lyrics, or instrumental; female, male or duet vocals
+- **Lyrics helper**: "Draft from my description" writes editable lyrics with Claude
 - **Tempo** (60–180 BPM) and **length** (1–4 minutes)
 
-Songs are generated with the [ElevenLabs Music API](https://elevenlabs.io/docs/api-reference/music/compose). Each click makes two versions, which appear in the song list where they can be played, downloaded as MP3, removed, or **remixed** (loads that song's settings back into the composer to tweak and regenerate).
+Songs are made with **ElevenLabs Music** or **MiniMax Music** (your choice). Each click makes two versions, which appear in the song list where they can be played, downloaded as MP3, removed, or **remixed** (loads that song's settings back into the composer to tweak and regenerate).
+
+Visitors **sign in** to generate, and each account has a **daily song limit**, so strangers can't spend your API balance. An invite code can restrict who may create an account.
 
 Each visitor's song list is saved in their own browser, so visitors never see each other's songs. The MP3s live on the server under unguessable links.
 
 ## Run it
 
-Requires Node 18 or newer. There are no packages to install.
+Requires Node 18 or newer.
 
 ```sh
-cp .env.example .env      # then put your ElevenLabs API key in .env
+npm install
+cp .env.example .env      # then fill in your keys (see below)
 npm start                 # open http://localhost:8000
 ```
 
-Without a key, the app runs in **demo mode**: everything works, but songs are silent placeholders and no credits are spent.
+Without a music key, the app runs in **demo mode**: everything works, but songs are silent placeholders and nothing is charged.
 
-### Getting an API key
+### Keys and settings (`.env`)
 
-1. Create an account at elevenlabs.io and choose a plan that includes music generation.
-2. Create an API key in your account's developer settings.
-3. Paste it into `.env` as `ELEVENLABS_API_KEY=…`.
+| Setting | What it does |
+| --- | --- |
+| `ELEVENLABS_API_KEY` | Music from ElevenLabs (a plan that includes music). |
+| `MINIMAX_API_KEY` | Music from MiniMax. If both keys are set, `MUSIC_PROVIDER` picks (`elevenlabs` or `minimax`). |
+| `ANTHROPIC_API_KEY` | Turns on the lyrics helper (Claude). Optional. |
+| `REQUIRE_LOGIN` | `true` (default): visitors must sign in to generate. |
+| `SIGNUP_CODE` | Invite code needed to create an account. **Set this**, or anyone can sign up. |
+| `DAILY_SONGS_PER_USER` | Songs each account can make per day (default 10). Each version counts. |
+| `DAILY_LYRICS_PER_USER` | Lyric drafts per account per day (default 20). |
+| `VERSIONS_PER_REQUEST` | Songs per click (default 2). Each is a separate paid API call. |
+| `RATE_LIMIT_PER_HOUR` | Generate requests per visitor IP per hour (default 20). |
+| `DATA_DIR` | Where accounts and songs are stored (default `./data`). |
 
-Each song is one paid API call, so one click costs two songs by default. Lower `VERSIONS_PER_REQUEST` in `.env` to 1 to halve that. `RATE_LIMIT_PER_HOUR` caps how many generate requests each visitor can make (default 20).
+## Accounts
+
+- Passwords are hashed with scrypt; accounts are stored in `DATA_DIR/users.json`.
+- Sessions are signed, HTTP-only cookies that last 30 days. The signing key is `SESSION_SECRET`, or a random key saved in `DATA_DIR/session-secret`.
+- Sign-in and sign-up attempts are limited to 10 per 15 minutes per IP.
+- Daily limits reset at midnight UTC. Failed generations don't count.
+- To reset a password or remove an account, edit `users.json` while the server is stopped (delete the user's entry and have them sign up again).
 
 ## Tests
 
@@ -37,43 +56,48 @@ Each song is one paid API call, so one click costs two songs by default. Lower `
 npm test
 ```
 
-Starts the server against a local stand-in for the ElevenLabs API and checks the request sent to it, audio serving, input validation, file-path safety, error messages, demo mode and the rate limit. GitHub Actions runs them on every push.
+Starts the server against local stand-ins for the ElevenLabs, MiniMax and Claude APIs. Checks sign-up, sign-in, sessions and tampered cookies, invite codes, daily limits, the exact requests each API receives, audio serving, input validation, file-path safety, error messages, demo mode and the rate limit. GitHub Actions runs them on every push.
 
 ## How it works
 
 ```
-browser (public/)  ──POST /api/generate──▶  server.js  ──▶  ElevenLabs /v1/music
-       ▲                                        │
-       └──────── /audio/<id>.mp3 ◀──── saves MP3 to generated/
+browser (public/) ──POST /api/generate──▶ server.js ──▶ ElevenLabs /v1/music
+       │          ──POST /api/lyrics────▶    │      ──▶ or MiniMax /v1/music_generation
+       │          ──/api/login, signup──▶    │      ──▶ Claude (lyrics helper)
+       ▲                                     │
+       └────────── /audio/<id>.mp3 ◀──── saves MP3s to DATA_DIR/generated/
 ```
 
-- `server.js` validates the request (only known genres, moods and instruments; prompt ≤300 characters, lyrics ≤3000), turns the choices into a music prompt, calls the provider and saves the returned MP3.
-- The API key stays on the server. It is never sent to the browser.
-- `providers/elevenlabs.js` builds the prompt and calls the API. To use a different music service, add another file in `providers/` with the same `generate(request) → { audio, extension }` shape and select it in `server.js`.
+- `server.js` checks the session and daily limit, validates the request (only known genres, moods and instruments; prompt ≤300 characters, lyrics ≤3000), calls the music provider and saves the MP3.
+- API keys stay on the server and are never sent to the browser.
+- To add another music service, add a file in `providers/` with the same `generate(request) → { audio, extension }` shape and select it in `pickProvider()` in `server.js`.
 
 ## Deploying
 
-GitHub Pages only serves static files, so it can show the demo but cannot generate real songs. To go live, deploy the whole repository to a Node host.
+GitHub Pages only serves static files, so it can show the demo but cannot generate real songs. Deploy the whole repository to a Node host.
 
-**Render (set up in this repo):** in the Render dashboard choose **New › Blueprint**, pick this repository, and paste your ElevenLabs key when asked. `render.yaml` creates the web service, a health check and a 1 GB disk so songs survive redeploys (disks need a paid instance).
+**Render (set up in this repo):** in the Render dashboard choose **New › Blueprint**, pick this repository, and fill in the keys and `SIGNUP_CODE` when asked. `render.yaml` creates the web service, a health check and a 1 GB disk so accounts and songs survive redeploys (disks need a paid instance).
 
 **Any other Node host** (Railway, Fly.io, a VPS):
 
-- Start command: `npm start`
-- Environment variable: `ELEVENLABS_API_KEY`
-- Generated songs are saved in `generated/` (or `AUDIO_DIR`). On hosts with temporary disks they are lost on redeploy unless you attach a persistent disk.
+- Build command: `npm install`; start command: `npm start`
+- Set the keys above as environment variables
+- Point `DATA_DIR` at a persistent disk, or accounts and songs are lost on redeploy
 
 ## Files
 
 | File | Purpose |
 | --- | --- |
-| `server.js` | Web server, `/api/generate`, input checks, rate limit, audio storage |
-| `providers/elevenlabs.js` | ElevenLabs Music API call and prompt building |
-| `providers/mock.js` | Demo mode when no key is set |
-| `public/index.html` | Page structure |
+| `server.js` | Web server, API routes, validation, limits, audio storage |
+| `lib/auth.js` | Accounts, password hashing, signed session cookies, daily limits |
+| `providers/elevenlabs.js` | ElevenLabs Music API |
+| `providers/minimax.js` | MiniMax Music API |
+| `providers/lyrics.js` | Lyrics helper (Claude API) |
+| `providers/mock.js` | Demo mode when no music key is set |
+| `public/index.html` | Page structure and sign-in dialog |
 | `public/styles.css` | Visual design (colours and fonts are CSS variables in `:root`) |
-| `public/app.js` | Composer controls, song list (saved in the browser), playback, remix, download |
-| `public/provider.js` | Browser side of generation; falls back to demo mode without the server |
+| `public/app.js` | Composer, account, lyrics helper, song list, playback, remix, download |
+| `public/provider.js` | Browser side of the API calls; demo mode without the server |
 | `.env.example` | Settings template |
 | `render.yaml` | One-click deploy to Render |
 | `test/server.test.js` | Server tests (`npm test`) |

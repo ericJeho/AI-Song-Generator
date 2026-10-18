@@ -1,13 +1,12 @@
-// Song generation provider.
+// Talks to this site's own server (server.js), which holds the API keys.
 //
-// The UI calls `window.SongProvider.generate(request)` and expects a Promise
-// that resolves to an array of songs:
-//   { title, tags, duration (seconds), audioUrl (or null) }
+// SongProvider.generate(request) resolves to { songs: [...], user } where each song is
+//   { title, tags, duration (seconds), audioUrl (or null) }.
+// SongProvider.draftLyrics(request) resolves to { lyrics, user }.
+// Failed calls reject with an Error carrying `status` (401 means "sign in first").
 //
-// It posts the request to this site's own server (server.js), which holds the
-// music API key and calls the music service. When the page is opened without
-// that server (for example from GitHub Pages or straight from disk), it falls
-// back to a demo that returns silent placeholder songs.
+// When the page is opened without the server (GitHub Pages, or straight from disk),
+// generate() falls back to a demo that returns silent placeholder songs.
 
 (function () {
   const STOP = ['the', 'and', 'for', 'with', 'after', 'about', 'from', 'into', 'that', 'this', 'last', 'by', 'through', 'late'];
@@ -27,30 +26,45 @@
     tags.push(req.tempo + ' BPM');
     if (req.lyricMode === 'none') tags.push('Instrumental');
     const base = titleFrom(req.prompt);
-    return [0, 1].map((k) => ({
-      title: k === 0 ? base : base + ' (Alt Take)',
-      tags: tags.join(' · '),
-      duration: Math.max(40, req.length - 6 + k * 9),
-      audioUrl: null
-    }));
+    return {
+      user: null,
+      songs: [0, 1].map((k) => ({
+        title: k === 0 ? base : base + ' (Alt Take)',
+        tags: tags.join(' · '),
+        duration: Math.max(40, req.length - 6 + k * 9),
+        audioUrl: null
+      }))
+    };
   }
 
-  async function serverGenerate(req) {
-    let res;
-    try {
-      res = await fetch('api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(req)
-      });
-    } catch {
-      return demoGenerate(req); // no server reachable (file:// or offline)
-    }
-    if (res.status === 404 || res.status === 405) return demoGenerate(req); // static hosting, no API
+  async function postJson(url, body) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
     const data = await res.json().catch(() => null);
-    if (!res.ok) throw new Error((data && data.error) || 'Generation failed (' + res.status + ').');
+    if (!res.ok) {
+      throw Object.assign(new Error((data && data.error) || 'Request failed (' + res.status + ').'), { status: res.status, noServer: !data });
+    }
     return data;
   }
 
-  window.SongProvider = { generate: serverGenerate };
+  async function generate(req) {
+    try {
+      return await postJson('api/generate', req);
+    } catch (err) {
+      // No server behind this page (offline, file://, or static hosting): use the demo.
+      if (err instanceof TypeError || err.noServer) return demoGenerate(req);
+      throw err;
+    }
+  }
+
+  window.SongProvider = {
+    generate,
+    draftLyrics: (req) => postJson('api/lyrics', req),
+    signIn: (body) => postJson('api/login', body),
+    signUp: (body) => postJson('api/signup', body),
+    signOut: () => postJson('api/logout', {})
+  };
 })();

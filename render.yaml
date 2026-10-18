@@ -1,5 +1,5 @@
-# Render Blueprint: deploys the app as a Node web service with a disk for generated songs.
-# In Render: New > Blueprint, pick this repository, then paste your ElevenLabs key when asked.
+# Render Blueprint: deploys the app as a Node web service with a disk for accounts and songs.
+# In Render: New > Blueprint, pick this repository, then fill in the keys it asks for.
 services:
   - type: web
     name: cadence-song-generator
@@ -9,15 +9,24 @@ services:
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:
+      # Entered by you in the Render dashboard, never stored in the repo. Leave unused ones empty.
       - key: ELEVENLABS_API_KEY
-        sync: false # entered by you in the Render dashboard, never stored in the repo
-      - key: AUDIO_DIR
-        value: /var/data/generated
+        sync: false
+      - key: MINIMAX_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: SIGNUP_CODE
+        sync: false
+      - key: DATA_DIR
+        value: /var/data
+      - key: REQUIRE_LOGIN
+        value: "true"
+      - key: DAILY_SONGS_PER_USER
+        value: "10"
       - key: VERSIONS_PER_REQUEST
         value: "2"
-      - key: RATE_LIMIT_PER_HOUR
-        value: "20"
     disk:
-      name: songs
+      name: data
       mountPath: /var/data
       sizeGB: 1
