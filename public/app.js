@@ -6,6 +6,7 @@
   ];
   const INSTRUMENTS = ['Piano', 'Acoustic guitar', 'Electric guitar', '808s', 'Synth pads', 'Strings', 'Saxophone', 'Talking drum', 'Bass', 'Brass'];
   const LYRIC_MODES = [['auto', 'Write for me'], ['custom', 'My lyrics'], ['none', 'Instrumental']];
+  const ENGINES = [['synth', 'Built-in synth · free'], ['ai', 'AI vocals · sign in']];
   const VOICES = ['Female', 'Male', 'Duet'];
   const LENGTHS = [60, 120, 180, 240];
   const SUGGESTIONS = [
@@ -30,7 +31,7 @@
 
   function toTrack(song) {
     const h = hash(song.id);
-    const track = Object.assign({}, song, { cover: COVERS[h % COVERS.length], seed: h % 1000 });
+    const track = Object.assign({}, song, { cover: COVERS[h % COVERS.length], waveSeed: h % 1000 });
     if (track.status === 'pending' && track.createdAt && Date.now() - Date.parse(track.createdAt) > STALE_MS) {
       track.status = 'failed';
       track.error = 'This song took too long and was stopped. Remove it and try again, perhaps with a shorter length.';
@@ -48,8 +49,10 @@
     lyrics: '',
     tempo: 104,
     length: 180,
+    engine: 'synth', // 'synth': built-in, free, no sign-in; 'ai': AI vocals through the server (sign-in)
     generating: false,
     drafting: false,
+    preparingId: null, // a built-in synth song being rendered before it plays
     health: null, // what the server supports, from /api/health (null without a server)
     me: null, // the signed-in user
     versions: 2,
@@ -62,6 +65,46 @@
 
   const $ = (id) => document.getElementById(id);
   const audio = new Audio();
+
+  // Built-in synth songs are rendered in the browser the first time they're played.
+  // The last few renders are kept as in-memory WAV files.
+  const RENDER_CACHE = 4;
+  const rendered = new Map(); // song id -> { url, peaks, duration }
+  const rendering = new Map(); // song id -> Promise of the above
+
+  function audioFor(t) {
+    if (t.audioUrl) return t.audioUrl;
+    const r = rendered.get(t.id);
+    return r ? r.url : null;
+  }
+
+  function renderSynth(t) {
+    if (rendered.has(t.id)) {
+      const r = rendered.get(t.id);
+      rendered.delete(t.id);
+      rendered.set(t.id, r); // most recently used last
+      return Promise.resolve(r);
+    }
+    if (rendering.has(t.id)) return rendering.get(t.id);
+    if (!window.CadenceSynth) return Promise.reject(new Error('This browser cannot make audio.'));
+    const job = window.CadenceSynth.render(t.request, t.seed).then((out) => {
+      const r = { url: URL.createObjectURL(window.CadenceSynth.toWav(out.buffer)), peaks: out.peaks, duration: out.duration };
+      rendered.set(t.id, r);
+      for (const [id, old] of rendered) {
+        if (rendered.size <= RENDER_CACHE) break;
+        if (id === state.currentId) continue;
+        URL.revokeObjectURL(old.url);
+        rendered.delete(id);
+      }
+      return r;
+    }).finally(() => rendering.delete(t.id));
+    rendering.set(t.id, job);
+    return job;
+  }
+
+  function aiAvailable() {
+    return Boolean(state.health && state.health.provider && state.health.provider !== 'mock');
+  }
 
   function el(tag, attrs, children) {
     const node = document.createElement(tag);
@@ -152,8 +195,22 @@
     $('style-string').textContent = styleString();
     $('lyrics').value = state.lyrics;
 
+    if (!aiAvailable()) state.engine = 'synth';
+    $('engine-field').hidden = !aiAvailable();
+    renderToggleGroup($('engines'), ENGINES, (e) => state.engine === e[0], (e) => {
+      state.engine = e[0];
+      renderComposer();
+    }, '', (b, e) => (b.textContent = e[1]));
+    $('engine-note').textContent = state.engine === 'synth'
+      ? 'Composed in your browser: instrumental, with the melody hummed by a voice-like lead. No sign-in.'
+      : 'Sung by an AI music service. Needs an account; counts toward your daily songs.';
+    $('synth-lyrics-note').hidden = !(state.engine === 'synth' && state.lyricMode === 'custom');
+    const versions = state.engine === 'synth' ? 2 : state.versions;
+    $('versions-note').textContent = 'Creates ' + versions + (versions === 1 ? ' version' : ' versions') +
+      (state.engine === 'synth' ? ' · free, made in your browser' : '');
+
     const btn = $('generate');
-    const outOfSongs = state.me && state.me.songsLeftToday < 1;
+    const outOfSongs = state.engine === 'ai' && state.me && state.me.songsLeftToday < 1;
     if (needsSignIn()) {
       btn.disabled = false;
       $('generate-label').textContent = 'Sign in to generate';
@@ -180,6 +237,7 @@
   }
   const REMIX_ICON = icon('<path d="M4 7h11l-3-3M20 17H9l3 3M18 7a4 4 0 0 1 2 3.5M6 17a4 4 0 0 1-2-3.5"/>');
   const DOWNLOAD_ICON = icon('<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>');
+  const SPINNER_SVG = '<svg class="spin" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-opacity=".25" stroke-width="2"/><path d="M14 8a6 6 0 0 0-6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
   const DELETE_ICON = icon('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>');
 
   // Load a song's settings back into the composer so it can be tweaked and regenerated.
@@ -228,22 +286,58 @@
     return title.split(' ').filter((w) => /[A-Za-z]/.test(w[0])).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
   }
 
-  function togglePlay(t) {
+  async function togglePlay(t) {
+    if (t.engine === 'synth' && !audioFor(t)) {
+      if (state.preparingId === t.id) return;
+      audio.pause();
+      state.playing = false;
+      state.currentId = t.id;
+      state.preparingId = t.id;
+      state.pos = 0;
+      renderLibrary();
+      try {
+        await renderSynth(t);
+      } catch (err) {
+        console.error(err);
+        if (state.preparingId === t.id) state.preparingId = null;
+        renderLibrary();
+        alert('Could not play this song: ' + err.message);
+        return;
+      }
+      if (state.preparingId !== t.id) return; // another song was picked meanwhile
+      state.preparingId = null;
+      state.currentId = null; // start it fresh below
+    }
+    const src = audioFor(t);
     if (state.currentId === t.id) {
       state.playing = !state.playing;
     } else {
       audio.pause();
+      state.preparingId = null;
       state.currentId = t.id;
       state.pos = 0;
       state.playing = true;
-      if (t.audioUrl) audio.src = t.audioUrl;
+      if (src) audio.src = src;
       else audio.removeAttribute('src');
     }
-    if (t.audioUrl) {
+    if (src) {
       if (state.playing) audio.play().catch(() => { state.playing = false; renderLibrary(); });
       else audio.pause();
     }
     renderLibrary();
+  }
+
+  async function downloadSynth(t) {
+    try {
+      const r = await renderSynth(t);
+      const a = el('a', { href: r.url, download: t.title + '.wav' });
+      document.body.append(a);
+      a.click();
+      a.remove();
+      renderLibrary();
+    } catch (err) {
+      alert('Could not prepare the download: ' + err.message);
+    }
   }
 
   // Real audio: use the file's true length, and stop at the end.
@@ -262,7 +356,7 @@
     const frac = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
     if (state.currentId !== t.id) togglePlay(t);
     state.pos = frac * t.duration;
-    if (t.audioUrl) audio.currentTime = state.pos;
+    if (audioFor(t)) audio.currentTime = state.pos;
     renderLibrary();
   }
 
@@ -282,21 +376,29 @@
     }
     const isCur = state.currentId === t.id;
     const isPlaying = isCur && state.playing;
-    const frac = isCur ? state.pos / t.duration : 0;
+    const isPreparing = state.preparingId === t.id;
+    const r = rendered.get(t.id);
+    const duration = (r && r.duration) || t.duration;
+    const frac = isCur ? state.pos / duration : 0;
 
     const cover = el('div', { class: 'cover', style: 'background:' + t.cover, html: COVER_SVG }, [el('span', { text: initials(t.title) })]);
 
     const titleRow = el('div', { class: 'title-row' }, [el('h3', { text: t.title })]);
     if (state.newIds.includes(t.id)) titleRow.append(el('span', { class: 'badge', text: 'New' }));
 
-    const hs = bars(t.seed);
+    const hs = r ? r.peaks.map((p) => Math.round(10 + p * 90)) : bars(t.waveSeed);
     const wave = el('div', { class: 'wave', 'aria-hidden': 'true', onclick: (e) => seek(t, e) },
       hs.map((h, i) => el('span', { style: 'height:' + h + '%', class: isCur && i / hs.length < frac ? 'played' : '' })));
 
     const player = el('div', { class: 'player' }, [
-      el('button', { type: 'button', class: 'play', 'aria-label': (isPlaying ? 'Pause ' : 'Play ') + t.title, html: isPlaying ? PAUSE_SVG : PLAY_SVG, onclick: () => togglePlay(t) }),
+      el('button', {
+        type: 'button', class: 'play' + (isPreparing ? ' preparing' : ''),
+        'aria-label': (isPreparing ? 'Preparing ' : isPlaying ? 'Pause ' : 'Play ') + t.title,
+        html: isPreparing ? SPINNER_SVG : isPlaying ? PAUSE_SVG : PLAY_SVG,
+        onclick: () => togglePlay(t)
+      }),
       wave,
-      el('span', { class: 'time', text: (isCur ? fmt(state.pos) + ' / ' : '') + fmt(t.duration) })
+      el('span', { class: 'time', text: isPreparing ? 'Preparing…' : (isCur ? fmt(state.pos) + ' / ' : '') + fmt(duration) })
     ]);
 
     const actions = el('div', { class: 'actions' });
@@ -305,6 +407,8 @@
     }
     if (t.audioUrl) {
       actions.append(el('a', { class: 'icon-btn', href: t.audioUrl, download: t.title + '.mp3', 'aria-label': 'Download ' + t.title, title: 'Download', html: DOWNLOAD_ICON }));
+    } else if (t.engine === 'synth') {
+      actions.append(el('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Download ' + t.title + ' as WAV', title: 'Download', html: DOWNLOAD_ICON, onclick: () => downloadSynth(t) }));
     }
     actions.append(el('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Remove ' + t.title, title: 'Remove', html: DELETE_ICON, onclick: () => removeTrack(t) }));
 
@@ -315,11 +419,11 @@
     ]);
   }
 
-  function pendingCard(label) {
+  function pendingCard(label, quick) {
     return el('div', { class: 'card pending' }, [
       el('div', { class: 'skel', style: 'width:84px;height:84px;border-radius:14px;flex:none' }),
       el('div', { class: 'meta', style: 'gap:10px' }, [
-        el('span', { style: 'font-weight:600', text: 'Composing ' + label + '… this can take a minute or two' }),
+        el('span', { style: 'font-weight:600', text: 'Composing ' + label + (quick ? '…' : '… this can take a minute or two') }),
         el('div', { class: 'skel', style: 'height:10px;width:70%' }),
         el('div', { class: 'skel', style: 'height:28px;width:100%;background:#22252C' })
       ])
@@ -327,8 +431,9 @@
   }
 
   function renderLibrary() {
-    const count = state.me ? Math.min(state.versions, Math.max(1, state.me.songsLeftToday)) : state.versions;
-    const pending = state.generating ? 'ABCD'.slice(0, count).split('').map((l) => pendingCard('version ' + l)) : [];
+    const synth = state.engine === 'synth';
+    const count = !synth && state.me ? Math.min(state.versions, Math.max(1, state.me.songsLeftToday)) : synth ? 2 : state.versions;
+    const pending = state.generating ? 'ABCD'.slice(0, count).split('').map((l) => pendingCard('version ' + l, synth)) : [];
     $('pending').replaceChildren(...pending);
     $('tracks').replaceChildren(...state.tracks.map(trackCard));
     $('track-count').textContent = state.tracks.length;
@@ -361,9 +466,11 @@
     const request = currentRequest();
     let retry = false;
     try {
-      const result = await provider.generate(request);
+      const result = state.engine === 'ai' ? await provider.generateAI(request) : await provider.generateSynth(request);
       if (result.user) state.me = result.user;
       const made = result.songs.map(toTrack);
+      // Render the first built-in version right away so it plays instantly and shows its real waveform.
+      if (made[0] && made[0].engine === 'synth') await renderSynth(made[0]).catch((err) => console.error(err));
       state.tracks = made.concat(state.tracks.filter((t) => !made.some((m) => m.id === t.id)));
       state.newIds = made.map((m) => m.id);
       if (made.some((t) => t.status === 'pending')) pollTimer = setTimeout(refreshSongs, POLL_MS);
@@ -429,11 +536,11 @@
   }
 
   function needsSignIn() {
-    return Boolean(state.health && state.health.requireLogin && !state.me);
+    return state.engine === 'ai' && !state.me;
   }
 
   function renderAccount() {
-    const usesAccounts = Boolean(state.health && state.health.requireLogin);
+    const usesAccounts = aiAvailable();
     $('account').hidden = !usesAccounts;
     if (!usesAccounts) return;
     $('sign-in-btn').hidden = Boolean(state.me);
@@ -494,11 +601,11 @@
     clearTimeout(pollTimer);
     audio.pause();
     state.me = null;
-    state.tracks = [];
+    state.engine = 'synth';
     state.currentId = null;
     state.playing = false;
     renderComposer();
-    renderLibrary();
+    refreshSongs();
   }
 
   // ---------- Playback clock ----------
@@ -507,8 +614,8 @@
     if (!state.playing) return;
     const t = state.tracks.find((x) => x.id === state.currentId);
     if (!t) return;
-    state.pos = t.audioUrl ? audio.currentTime : state.pos + 0.25;
-    if (!t.audioUrl && state.pos >= t.duration) {
+    state.pos = audioFor(t) ? audio.currentTime : state.pos + 0.25;
+    if (!audioFor(t) && state.pos >= t.duration) {
       state.playing = false;
       state.pos = 0;
     }
@@ -540,19 +647,11 @@
   provider.init().then(({ health, me }) => {
     state.health = health;
     state.me = me;
-    if (health) {
-      state.versions = health.versionsPerRequest || state.versions;
-      $('versions-note').textContent = 'Creates ' + state.versions + (state.versions === 1 ? ' version' : ' versions') +
-        (health.provider === 'mock' ? ' · demo mode, songs are silent' : '');
-    } else {
-      $('versions-note').textContent = 'Demo mode · songs are silent';
-    }
+    if (health) state.versions = health.versionsPerRequest || state.versions;
     renderComposer();
-    return refreshSongs();
   }).catch((err) => {
     console.error('Could not reach the backend:', err);
-    $('versions-note').textContent = 'Can’t reach the server right now. Try again later.';
-  });
+  }).finally(refreshSongs);
 
   renderComposer();
   renderLibrary();

@@ -103,6 +103,7 @@
           <button type="button" id="draft-lyrics" class="btn-outline small" hidden>Draft from my description</button>
         </div>
         <p id="lyrics-error" class="form-error" role="alert" hidden></p>
+        <p id="synth-lyrics-note" class="muted" hidden>The built-in synth hums your melody but can’t sing the words. Sung lyrics need an AI music service.</p>
         <textarea id="lyrics" rows="5" class="mono" placeholder="[Verse]&#10;Streetlights humming my name…&#10;&#10;[Chorus]&#10;…"></textarea>
       </div>
 
@@ -119,6 +120,12 @@
           <div id="lengths" class="segmented mono"></div>
         </fieldset>
       </div>
+
+      <fieldset id="engine-field" hidden>
+        <legend class="eyebrow">Sound</legend>
+        <div id="engines" class="segmented"></div>
+      </fieldset>
+      <p id="engine-note" class="muted engine-note"></p>
 
       <div class="submit">
         <div class="field">
@@ -149,6 +156,7 @@
 
   <script src="vendor/supabase-js-2.117.2.js"></script>
   <script src="config.js"></script>
+  <script src="synth.js"></script>
   <script src="provider.js"></script>
   <script src="app.js"></script>
 </body>

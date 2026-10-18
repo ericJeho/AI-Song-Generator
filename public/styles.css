@@ -123,3 +123,9 @@ dialog input { width: 100%; min-height: 44px; background: var(--ground); color: 
 .skel { background: #2A2D35; border-radius: 6px; animation: pulse 1.2s ease-in-out infinite; }
 @keyframes pulse { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .skel { animation: none; } }
+
+.engine-note { margin: -12px 0 0; }
+.play.preparing { cursor: progress; }
+.spin { animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation-duration: 3s; } }
