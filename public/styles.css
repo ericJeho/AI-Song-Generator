@@ -58,6 +58,11 @@ input[type=range] { width: 100%; height: 44px; margin: 0; accent-color: var(--ac
 .suggestion { min-height: 36px; padding: 6px 12px; border-radius: 999px; border: 1px dashed #3A3D46; background: transparent; color: #CFCDC6; font-size: 13px; }
 
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.genre-add { display: flex; gap: 8px; margin-top: 10px; }
+.genre-add input { flex: 1 1 auto; min-width: 0; min-height: 44px; background: var(--ground); color: var(--text); border: 1px solid var(--line-hi); border-radius: 12px; padding: 10px 14px; font: inherit; }
+.chip.custom { display: inline-flex; align-items: center; gap: 8px; }
+.chip.custom .x { font-size: 18px; line-height: 1; opacity: .8; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .chip { min-height: 44px; padding: 8px 16px; border-radius: 999px; border: 1px solid #343740; background: transparent; color: #D5D3CC; font-weight: 500; }
 #instruments .chip { border-radius: 12px; padding: 8px 14px; }
 .chip[aria-pressed=true], .mood[aria-pressed=true] { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }

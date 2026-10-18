@@ -155,9 +155,11 @@ Deno.test('lyrics: off when no Claude key is set', async () => {
   assertEquals((await call('POST', '/lyrics', SONG, 'token-ana')).status, 404);
 });
 
-Deno.test('validation drops unknown options and clamps numbers', () => {
-  const v = validate({ prompt: ' x ', genres: ['Jazz', 'Nope'], tempo: 999, length: 5, lyricMode: 'weird' });
-  assertEquals([v.genres, v.tempo, v.length, v.lyricMode], [['Jazz'], 180, 30, 'auto']);
+Deno.test('validation keeps any typed genre, cleans it, and clamps numbers', () => {
+  const v = validate({ prompt: ' x ', genres: ['jazz', 'Bongo  Flava', 'JAZZ', 'sea shanty'], tempo: 999, length: 5, lyricMode: 'weird' });
+  assertEquals([v.genres, v.tempo, v.length, v.lyricMode], [['Jazz', 'Bongo Flava', 'sea shanty'], 180, 30, 'auto']);
+  const dirty = validate({ prompt: 'x', genres: ['<b>drill</b>', 'x'.repeat(80), 42, '   ', null] });
+  assertEquals(dirty.genres, ['bdrill/b', 'x'.repeat(40)]);
 });
 
 // ---------- Providers against local stand-ins ----------

@@ -41,6 +41,23 @@ function pickList(value: unknown, allowed: string[], max: number): string[] {
   return [...new Set(value.filter((v) => allowed.includes(v)))].slice(0, max);
 }
 
+// Any genre the visitor types: printable text only, at most 40 characters each, up to 3, no duplicates.
+// Known genres keep their usual spelling ('afrobeats' -> 'Afrobeats').
+export function cleanGenres(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  for (const v of value) {
+    if (typeof v !== 'string') continue;
+    // deno-lint-ignore no-control-regex
+    const text = v.replace(/[<>\u0000-\u001f\u007f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 40);
+    if (!text) continue;
+    const name = GENRES.find((g) => g.toLowerCase() === text.toLowerCase()) ?? text;
+    if (!out.some((g) => g.toLowerCase() === name.toLowerCase())) out.push(name);
+    if (out.length === 3) break;
+  }
+  return out;
+}
+
 // deno-lint-ignore no-explicit-any
 export function validate(body: any, { needLyrics = true } = {}): SongRequest {
   const prompt = String(body?.prompt ?? '').trim().slice(0, 300);
@@ -50,7 +67,7 @@ export function validate(body: any, { needLyrics = true } = {}): SongRequest {
   if (needLyrics && lyricMode === 'custom' && !lyrics) throw new HttpError(400, 'Add your lyrics, or pick another lyrics option.');
   return {
     prompt,
-    genres: pickList(body.genres, GENRES, 3),
+    genres: cleanGenres(body.genres),
     mood: MOODS.includes(body.mood) ? body.mood : null,
     instruments: pickList(body.instruments, INSTRUMENTS, INSTRUMENTS.length),
     lyricMode,

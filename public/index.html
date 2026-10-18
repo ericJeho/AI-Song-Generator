@@ -72,8 +72,15 @@
       </div>
 
       <fieldset>
-        <legend class="eyebrow">Genre <span class="hint">pick up to 3</span></legend>
+        <legend class="eyebrow">Genre <span class="hint">pick or type any genre, up to 3</span></legend>
         <div id="genres" class="chips"></div>
+        <div class="genre-add">
+          <label for="genre-input" class="visually-hidden">Any genre</label>
+          <input id="genre-input" type="text" list="genre-suggestions" maxlength="40" autocomplete="off" placeholder="Any genre: drill, bossa nova, Bongo Flava, sea shanty…">
+          <button type="button" id="genre-add" class="btn-outline">Add</button>
+          <datalist id="genre-suggestions"></datalist>
+        </div>
+        <p id="genre-hint" class="muted" hidden></p>
       </fieldset>
 
       <fieldset>

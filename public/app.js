@@ -154,12 +154,43 @@
     }));
   }
 
+  // Add a genre typed by the visitor. Matching is case-insensitive, so 'afrobeats' selects the Afrobeats chip.
+  function addGenre() {
+    const input = $('genre-input');
+    const text = input.value.replace(/[<>\u0000-\u001f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 40);
+    const hint = $('genre-hint');
+    hint.hidden = true;
+    if (!text) return;
+    if (state.genres.length >= 3) {
+      hint.textContent = 'You can mix up to 3 genres.';
+      hint.hidden = false;
+      return;
+    }
+    const known = GENRES.concat((window.CadenceSynth && window.CadenceSynth.genres) || []);
+    const name = known.find((g) => g.toLowerCase() === text.toLowerCase()) || text;
+    if (!state.genres.some((g) => g.toLowerCase() === name.toLowerCase())) state.genres = state.genres.concat(name);
+    input.value = '';
+    renderComposer();
+    input.focus();
+  }
+
   function renderComposer() {
     renderToggleGroup($('genres'), GENRES, (g) => state.genres.includes(g), (g) => {
       if (state.genres.includes(g)) state.genres = state.genres.filter((x) => x !== g);
       else if (state.genres.length < 3) state.genres = state.genres.concat(g);
       renderComposer();
     }, 'chip');
+    // Genres typed by the visitor show as removable chips after the quick picks.
+    state.genres.filter((g) => !GENRES.includes(g)).forEach((g) => {
+      $('genres').append(el('button', {
+        type: 'button', class: 'chip custom', 'aria-pressed': 'true', 'aria-label': 'Remove genre ' + g,
+        onclick: () => { state.genres = state.genres.filter((x) => x !== g); renderComposer(); }
+      }, [el('span', { text: g }), el('span', { class: 'x', 'aria-hidden': 'true', text: '×' })]));
+    });
+    const full = state.genres.length >= 3;
+    $('genre-input').disabled = full;
+    $('genre-add').disabled = full;
+    $('genre-input').placeholder = full ? 'Up to 3 genres: remove one to add another' : 'Any genre: drill, bossa nova, Bongo Flava, sea shanty…';
 
     renderToggleGroup($('moods'), MOODS, (m) => state.mood === m[0], (m) => {
       state.mood = state.mood === m[0] ? null : m[0];
@@ -635,6 +666,15 @@
   $('tempo').value = state.tempo;
   $('tempo').addEventListener('input', (e) => { state.tempo = Number(e.target.value); renderComposer(); });
   $('generate').addEventListener('click', generate);
+  $('genre-add').addEventListener('click', addGenre);
+  $('genre-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addGenre();
+    }
+  });
+  const suggestions = ((window.CadenceSynth && window.CadenceSynth.genres) || GENRES).filter((g) => !GENRES.includes(g));
+  $('genre-suggestions').replaceChildren(...suggestions.map((g) => el('option', { value: g })));
   $('draft-lyrics').addEventListener('click', draftLyrics);
   $('sign-in-btn').addEventListener('click', () => openAuth('signin'));
   $('sign-out-btn').addEventListener('click', signOut);
