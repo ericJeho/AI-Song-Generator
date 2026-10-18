@@ -1,4 +1,6 @@
 .env
-data/
-generated/
 node_modules/
+package-lock.json
+deno.lock
+supabase/.temp/
+.appwrite/

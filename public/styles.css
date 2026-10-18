@@ -107,6 +107,8 @@ input[type=range] { width: 100%; height: 44px; margin: 0; accent-color: var(--ac
 .btn-outline.small { min-height: 36px; padding: 6px 12px; font-size: 13px; }
 .btn-outline:disabled { opacity: .5; cursor: progress; }
 .form-error { margin: 0; color: #FFB3A1; font-size: 14px; }
+.form-error.info { color: #CFE8C9; }
+.card.failed { border-color: #5A3A33; }
 
 dialog { width: min(420px, calc(100vw - 32px)); padding: 0; border: 1px solid var(--line); border-radius: 20px; background: var(--surface); color: var(--text); }
 dialog::backdrop { background: rgba(5, 6, 8, .7); }

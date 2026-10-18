@@ -14,25 +14,28 @@
     'Lullaby for a robot learning to dream'
   ];
   const COVERS = ['#FF9A62', '#5EC8B8', '#B69CFF', '#F2C14E', '#7DA2FF', '#F27BA6'];
-  const STORAGE_KEY = 'cadence.library.v1';
   const SETTINGS = ['prompt', 'genres', 'mood', 'instruments', 'lyricMode', 'voice', 'lyrics', 'tempo', 'length'];
+  const POLL_MS = 4000;
+  const provider = window.SongProvider;
 
-  // The song list is kept in this browser only, so visitors never see each other's songs.
-  function loadLibrary() {
-    try {
-      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-      return Array.isArray(saved) ? saved.filter((t) => t && t.id && t.title) : [];
-    } catch {
-      return [];
-    }
+  // Cover colour and waveform shape come from the song's id, so they stay the same on every visit.
+  function hash(text) {
+    let h = 0;
+    for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) >>> 0;
+    return h;
   }
 
-  function saveLibrary() {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state.tracks));
-    } catch {
-      // Storage full or blocked: the list still works until the page is closed.
+  // A song still pending after this long was cut off on the server (Edge Function time limit).
+  const STALE_MS = 10 * 60 * 1000;
+
+  function toTrack(song) {
+    const h = hash(song.id);
+    const track = Object.assign({}, song, { cover: COVERS[h % COVERS.length], seed: h % 1000 });
+    if (track.status === 'pending' && track.createdAt && Date.now() - Date.parse(track.createdAt) > STALE_MS) {
+      track.status = 'failed';
+      track.error = 'This song took too long and was stopped. Remove it and try again, perhaps with a shorter length.';
     }
+    return track;
   }
 
   const state = {
@@ -54,7 +57,7 @@
     currentId: null,
     playing: false,
     pos: 0,
-    tracks: loadLibrary()
+    tracks: []
   };
 
   const $ = (id) => document.getElementById(id);
@@ -190,16 +193,35 @@
     $('prompt').focus({ preventScroll: true });
   }
 
-  function removeTrack(t) {
+  async function removeTrack(t) {
     if (!confirm('Remove “' + t.title + '” from your songs?')) return;
+    try {
+      await provider.deleteSong(t);
+    } catch (err) {
+      alert('Could not remove the song: ' + err.message);
+      return;
+    }
     if (state.currentId === t.id) {
       audio.pause();
       state.currentId = null;
       state.playing = false;
     }
     state.tracks = state.tracks.filter((x) => x.id !== t.id);
-    saveLibrary();
     renderLibrary();
+  }
+
+  // Load the song list, and keep refreshing it while any song is still being made.
+  let pollTimer = null;
+  async function refreshSongs() {
+    clearTimeout(pollTimer);
+    try {
+      const songs = await provider.listSongs();
+      state.tracks = songs.map(toTrack);
+      renderLibrary();
+    } catch (err) {
+      console.error('Could not load songs:', err);
+    }
+    if (state.tracks.some((t) => t.status === 'pending')) pollTimer = setTimeout(refreshSongs, POLL_MS);
   }
 
   function initials(title) {
@@ -245,6 +267,19 @@
   }
 
   function trackCard(t) {
+    if (t.status === 'pending') return pendingCard('“' + t.title + '”');
+    if (t.status === 'failed') {
+      return el('article', { class: 'card failed' }, [
+        el('div', { class: 'meta' }, [
+          el('div', { class: 'title-row' }, [el('h3', { text: t.title })]),
+          el('span', { class: 'form-error', text: t.error || 'This song could not be made.' })
+        ]),
+        el('div', { class: 'actions' }, [
+          t.request ? el('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Try again with these settings', title: 'Try again', html: REMIX_ICON, onclick: () => remix(t) }) : '',
+          el('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Remove ' + t.title, title: 'Remove', html: DELETE_ICON, onclick: () => removeTrack(t) })
+        ])
+      ]);
+    }
     const isCur = state.currentId === t.id;
     const isPlaying = isCur && state.playing;
     const frac = isCur ? state.pos / t.duration : 0;
@@ -324,28 +359,20 @@
     renderComposer();
     renderLibrary();
     const request = currentRequest();
+    let retry = false;
     try {
-      const result = await window.SongProvider.generate(request);
+      const result = await provider.generate(request);
       if (result.user) state.me = result.user;
-      const now = Date.now();
-      const made = result.songs.map((s, k) => ({
-        id: 'g' + now + k,
-        title: s.title,
-        tags: s.audioUrl ? s.tags : s.tags + ' · Demo (silent)',
-        duration: s.duration,
-        audioUrl: s.audioUrl || null,
-        cover: COVERS[(state.tracks.length + k) % COVERS.length],
-        seed: (now % 1000) + k * 13,
-        createdAt: new Date(now).toISOString(),
-        request: request
-      }));
-      state.tracks = made.concat(state.tracks);
+      const made = result.songs.map(toTrack);
+      state.tracks = made.concat(state.tracks.filter((t) => !made.some((m) => m.id === t.id)));
       state.newIds = made.map((m) => m.id);
-      saveLibrary();
+      if (made.some((t) => t.status === 'pending')) pollTimer = setTimeout(refreshSongs, POLL_MS);
     } catch (err) {
       if (err.status === 401) {
         state.me = null;
         openAuth('signin');
+      } else if (err.status === 403) {
+        retry = await askForInviteCode();
       } else {
         alert(err.message || 'Something went wrong while generating.');
       }
@@ -354,6 +381,7 @@
       renderComposer();
       renderLibrary();
     }
+    if (retry) generate();
   }
 
   async function draftLyrics() {
@@ -361,14 +389,17 @@
     state.drafting = true;
     $('lyrics-error').hidden = true;
     renderComposer();
+    let retry = false;
     try {
-      const result = await window.SongProvider.draftLyrics(currentRequest());
+      const result = await provider.draftLyrics(currentRequest());
       if (result.user) state.me = result.user;
       state.lyrics = result.lyrics;
     } catch (err) {
       if (err.status === 401) {
         state.me = null;
         openAuth('signin');
+      } else if (err.status === 403) {
+        retry = await askForInviteCode();
       } else {
         $('lyrics-error').textContent = err.message;
         $('lyrics-error').hidden = false;
@@ -377,9 +408,25 @@
       state.drafting = false;
       renderComposer();
     }
+    if (retry) draftLyrics();
   }
 
   // ---------- Account ----------
+
+  // Accounts created without the right invite code can add it later. Returns true once approved.
+  async function askForInviteCode() {
+    const code = prompt('This site needs an invite code before you can create songs. Enter it here:');
+    if (!code) return false;
+    try {
+      const result = await provider.redeem(code);
+      state.me = result.user;
+      renderComposer();
+      return true;
+    } catch (err) {
+      alert(err.message);
+      return false;
+    }
+  }
 
   function needsSignIn() {
     return Boolean(state.health && state.health.requireLogin && !state.me);
@@ -422,13 +469,16 @@
     const body = { email: $('auth-email').value, password: $('auth-password').value, inviteCode: $('auth-invite').value };
     $('auth-submit').disabled = true;
     try {
-      const result = authMode === 'signup' ? await window.SongProvider.signUp(body) : await window.SongProvider.signIn(body);
+      const result = authMode === 'signup' ? await provider.signUp(body) : await provider.signIn(body);
       state.me = result.user;
       $('auth-password').value = '';
       $('auth-dialog').close();
       renderComposer();
+      refreshSongs();
     } catch (err) {
+      if (err.info) setAuthMode('signin');
       $('auth-error').textContent = err.message;
+      $('auth-error').classList.toggle('info', Boolean(err.info));
       $('auth-error').hidden = false;
     } finally {
       $('auth-submit').disabled = false;
@@ -437,12 +487,18 @@
 
   async function signOut() {
     try {
-      await window.SongProvider.signOut();
+      await provider.signOut();
     } catch {
       // Signed out locally either way.
     }
+    clearTimeout(pollTimer);
+    audio.pause();
     state.me = null;
+    state.tracks = [];
+    state.currentId = null;
+    state.playing = false;
     renderComposer();
+    renderLibrary();
   }
 
   // ---------- Playback clock ----------
@@ -480,18 +536,22 @@
   $('auth-close').addEventListener('click', () => $('auth-dialog').close());
   $('auth-form').addEventListener('submit', submitAuth);
 
-  // Ask the server what it supports and who is signed in. Without a server, the demo runs.
-  Promise.all([
-    fetch('api/health').then((r) => (r.ok ? r.json() : null)).catch(() => null),
-    fetch('api/me').then((r) => (r.ok ? r.json() : null)).catch(() => null)
-  ]).then(([health, me]) => {
-    if (!health || !health.ok) return;
+  // Ask the backend what it supports and who is signed in, then load their songs.
+  provider.init().then(({ health, me }) => {
     state.health = health;
-    state.me = me && me.user;
-    state.versions = health.versionsPerRequest || state.versions;
-    $('versions-note').textContent = 'Creates ' + state.versions + (state.versions === 1 ? ' version' : ' versions') +
-      (health.provider === 'mock' ? ' · demo mode, songs are silent' : '');
+    state.me = me;
+    if (health) {
+      state.versions = health.versionsPerRequest || state.versions;
+      $('versions-note').textContent = 'Creates ' + state.versions + (state.versions === 1 ? ' version' : ' versions') +
+        (health.provider === 'mock' ? ' · demo mode, songs are silent' : '');
+    } else {
+      $('versions-note').textContent = 'Demo mode · songs are silent';
+    }
     renderComposer();
+    return refreshSongs();
+  }).catch((err) => {
+    console.error('Could not reach the backend:', err);
+    $('versions-note').textContent = 'Can’t reach the server right now. Try again later.';
   });
 
   renderComposer();

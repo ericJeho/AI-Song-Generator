@@ -1,0 +1,24 @@
+{
+    "projectId": "<YOUR_APPWRITE_PROJECT_ID>",
+    "projectName": "Cadence",
+    "endpoint": "https://<REGION>.cloud.appwrite.io/v1",
+    "sites": [
+        {
+            "$id": "cadence",
+            "name": "Cadence",
+            "logging": true,
+            "framework": "other",
+            "timeout": 15,
+            "installCommand": "",
+            "buildCommand": "",
+            "outputDirectory": "./",
+            "buildSpecification": "s-1vcpu-512mb",
+            "runtimeSpecification": "s-1vcpu-512mb",
+            "buildRuntime": "node-22",
+            "adapter": "static",
+            "fallbackFile": "",
+            "deploymentRetention": 7,
+            "path": "public"
+        }
+    ]
+}

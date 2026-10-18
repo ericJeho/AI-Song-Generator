@@ -1,17 +1,14 @@
 {
   "name": "cadence-song-generator",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "Turn a text prompt into a song, with genre, mood, instrument, lyrics, tempo and length controls.",
-  "main": "server.js",
+  "description": "Turn a text prompt into a song, with genre, mood, instrument, lyrics, tempo and length controls. Supabase backend, Appwrite Sites front end.",
   "scripts": {
-    "start": "node server.js",
-    "test": "node --test"
+    "test": "deno test --allow-net --allow-env --allow-read --node-modules-dir=none supabase/functions/api",
+    "check": "deno check --node-modules-dir=none supabase/functions/api/index.ts",
+    "serve": "deno run --allow-net --allow-read jsr:@std/http@1/file-server public"
   },
-  "engines": {
-    "node": ">=18"
-  },
-  "dependencies": {
-    "@anthropic-ai/sdk": "^0.135.0"
+  "devDependencies": {
+    "deno": "2.9.6"
   }
 }

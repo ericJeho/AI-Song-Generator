@@ -1,0 +1,6 @@
+# Supabase CLI settings for this project (used by `supabase functions deploy` and `supabase db push`).
+project_id = "cadence"
+
+[functions.api]
+# The function checks the signed-in user itself (see handler.ts), so the gateway check is off.
+verify_jwt = false

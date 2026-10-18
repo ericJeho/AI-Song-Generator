@@ -5,99 +5,85 @@ Turn a short text prompt into a full song, with controls for:
 - **Genre**: up to 3 of 12 (Pop, Hip-Hop, Afrobeats, Amapiano, R&B, Lo-fi, House, Rock, Jazz, Synthwave, Folk, Cinematic)
 - **Mood**: Euphoric, Bittersweet, Chill, Melancholic, Dark, Romantic, Energetic, Dreamy
 - **Instruments**: piano, guitars, 808s, synth pads, strings, saxophone, talking drum, bass, brass
-- **Lyrics**: AI-written by the music model, your own lyrics, or instrumental; female, male or duet vocals
+- **Lyrics**: written by the music model, your own, or instrumental; female, male or duet vocals
 - **Lyrics helper**: "Draft from my description" writes editable lyrics with Claude
 - **Tempo** (60–180 BPM) and **length** (1–4 minutes)
 
-Songs are made with **ElevenLabs Music** or **MiniMax Music** (your choice). Each click makes two versions, which appear in the song list where they can be played, downloaded as MP3, removed, or **remixed** (loads that song's settings back into the composer to tweak and regenerate).
+Songs are made with **ElevenLabs Music** or **MiniMax Music**. Each click makes two versions, which can be played, downloaded as MP3, removed, or **remixed** (loads a song's settings back into the composer). Visitors sign in, need an invite code, and have a daily song limit, so strangers can't spend your API balance.
 
-Visitors **sign in** to generate, and each account has a **daily song limit**, so strangers can't spend your API balance. An invite code can restrict who may create an account.
-
-Each visitor's song list is saved in their own browser, so visitors never see each other's songs. The MP3s live on the server under unguessable links.
-
-## Run it
-
-Requires Node 18 or newer.
-
-```sh
-npm install
-cp .env.example .env      # then fill in your keys (see below)
-npm start                 # open http://localhost:8000
-```
-
-Without a music key, the app runs in **demo mode**: everything works, but songs are silent placeholders and nothing is charged.
-
-### Keys and settings (`.env`)
-
-| Setting | What it does |
-| --- | --- |
-| `ELEVENLABS_API_KEY` | Music from ElevenLabs (a plan that includes music). |
-| `MINIMAX_API_KEY` | Music from MiniMax. If both keys are set, `MUSIC_PROVIDER` picks (`elevenlabs` or `minimax`). |
-| `ANTHROPIC_API_KEY` | Turns on the lyrics helper (Claude). Optional. |
-| `REQUIRE_LOGIN` | `true` (default): visitors must sign in to generate. |
-| `SIGNUP_CODE` | Invite code needed to create an account. **Set this**, or anyone can sign up. |
-| `DAILY_SONGS_PER_USER` | Songs each account can make per day (default 10). Each version counts. |
-| `DAILY_LYRICS_PER_USER` | Lyric drafts per account per day (default 20). |
-| `VERSIONS_PER_REQUEST` | Songs per click (default 2). Each is a separate paid API call. |
-| `RATE_LIMIT_PER_HOUR` | Generate requests per visitor IP per hour (default 20). |
-| `DATA_DIR` | Where accounts and songs are stored (default `./data`). |
-
-## Accounts
-
-- Passwords are hashed with scrypt; accounts are stored in `DATA_DIR/users.json`.
-- Sessions are signed, HTTP-only cookies that last 30 days. The signing key is `SESSION_SECRET`, or a random key saved in `DATA_DIR/session-secret`.
-- Sign-in and sign-up attempts are limited to 10 per 15 minutes per IP.
-- Daily limits reset at midnight UTC. Failed generations don't count.
-- To reset a password or remove an account, edit `users.json` while the server is stopped (delete the user's entry and have them sign up again).
-
-## Tests
-
-```sh
-npm test
-```
-
-Starts the server against local stand-ins for the ElevenLabs, MiniMax and Claude APIs. Checks sign-up, sign-in, sessions and tampered cookies, invite codes, daily limits, the exact requests each API receives, audio serving, input validation, file-path safety, error messages, demo mode and the rate limit. GitHub Actions runs them on every push.
-
-## How it works
+## How it's built
 
 ```
-browser (public/) ──POST /api/generate──▶ server.js ──▶ ElevenLabs /v1/music
-       │          ──POST /api/lyrics────▶    │      ──▶ or MiniMax /v1/music_generation
-       │          ──/api/login, signup──▶    │      ──▶ Claude (lyrics helper)
-       ▲                                     │
-       └────────── /audio/<id>.mp3 ◀──── saves MP3s to DATA_DIR/generated/
+Appwrite Sites (public/)          Supabase project "cadence"
+  index.html, app.js  ──sign in──▶  Auth (email + password)
+  provider.js         ──read─────▶  songs table (each user sees only their own rows)
+                      ──POST─────▶  Edge Function "api" ──▶ ElevenLabs or MiniMax, Claude
+  <audio>             ◀──MP3──────  Storage bucket "songs"
 ```
 
-- `server.js` checks the session and daily limit, validates the request (only known genres, moods and instruments; prompt ≤300 characters, lyrics ≤3000), calls the music provider and saves the MP3.
-- API keys stay on the server and are never sent to the browser.
-- To add another music service, add a file in `providers/` with the same `generate(request) → { audio, extension }` shape and select it in `pickProvider()` in `server.js`.
-
-## Deploying
-
-GitHub Pages only serves static files, so it can show the demo but cannot generate real songs. Deploy the whole repository to a Node host.
-
-**Render (set up in this repo):** in the Render dashboard choose **New › Blueprint**, pick this repository, and fill in the keys and `SIGNUP_CODE` when asked. `render.yaml` creates the web service, a health check and a 1 GB disk so accounts and songs survive redeploys (disks need a paid instance).
-
-**Any other Node host** (Railway, Fly.io, a VPS):
-
-- Build command: `npm install`; start command: `npm start`
-- Set the keys above as environment variables
-- Point `DATA_DIR` at a persistent disk, or accounts and songs are lost on redeploy
-
-## Files
+- **Supabase** (`supabase/`): sign-in, the database (`profiles`, `songs`, `daily_usage`), MP3 storage, and the `api` Edge Function that checks the invite code and daily limit, calls the music and lyrics APIs, and saves the result. API keys live only in the function's secrets.
+- **Appwrite Sites** (`public/`): serves the static web page. No build step.
+- Generating is asynchronous: `/generate` creates "pending" songs and returns at once; the function makes the audio in the background, and the page refreshes the list every few seconds until the songs are ready.
 
 | File | Purpose |
 | --- | --- |
-| `server.js` | Web server, API routes, validation, limits, audio storage |
-| `lib/auth.js` | Accounts, password hashing, signed session cookies, daily limits |
-| `providers/elevenlabs.js` | ElevenLabs Music API |
-| `providers/minimax.js` | MiniMax Music API |
-| `providers/lyrics.js` | Lyrics helper (Claude API) |
-| `providers/mock.js` | Demo mode when no music key is set |
-| `public/index.html` | Page structure and sign-in dialog |
-| `public/styles.css` | Visual design (colours and fonts are CSS variables in `:root`) |
-| `public/app.js` | Composer, account, lyrics helper, song list, playback, remix, download |
-| `public/provider.js` | Browser side of the API calls; demo mode without the server |
-| `.env.example` | Settings template |
-| `render.yaml` | One-click deploy to Render |
-| `test/server.test.js` | Server tests (`npm test`) |
+| `supabase/migrations/…_init.sql` | Tables, row-level security, new-user trigger, daily-limit function, `songs` bucket |
+| `supabase/functions/api/index.ts` | Edge Function entry: connects routes to Supabase and the APIs |
+| `supabase/functions/api/handler.ts` | Routes: `/health`, `/me`, `/redeem`, `/generate`, `/lyrics` |
+| `supabase/functions/api/music.ts` | Input checks and the ElevenLabs / MiniMax / demo providers |
+| `supabase/functions/api/lyrics.ts` | Lyrics helper (Claude API) |
+| `supabase/functions/api/handler_test.ts` | Tests (`npm test`) |
+| `public/config.js` | Supabase project URL and publishable key (public by design) |
+| `public/provider.js` | Browser side: sign-in, song list, calls to the function |
+| `public/app.js`, `index.html`, `styles.css` | The page |
+| `public/vendor/` | Bundled supabase-js browser build (MIT licence alongside) |
+| `appwrite.config.json` | Appwrite Sites deployment settings |
+
+## Setup
+
+The Supabase project (`pbipjfwhdrlktlzgstxw`, eu-west-1) already has the database, storage bucket and `api` function deployed. Until a music key is added, it runs in demo mode (silent songs, nothing charged).
+
+### 1. Add the secrets in Supabase
+
+Supabase dashboard → **Edge Functions → Secrets**:
+
+| Secret | What it does |
+| --- | --- |
+| `ELEVENLABS_API_KEY` | Music from ElevenLabs (a plan that includes music). |
+| `MINIMAX_API_KEY` | Music from MiniMax. If both are set, `MUSIC_PROVIDER` (`elevenlabs` or `minimax`) picks. |
+| `ANTHROPIC_API_KEY` | Turns on the lyrics helper. Optional. |
+| `SIGNUP_CODE` | Invite code accounts need before they can generate. **Set this**, or anyone who signs up can use your balance. |
+| `ALLOWED_ORIGIN` | Your Appwrite site's address (e.g. `https://cadence.appwrite.network`), so only your site can call the function from a browser. |
+| `DAILY_SONGS_PER_USER`, `DAILY_LYRICS_PER_USER`, `VERSIONS_PER_REQUEST` | Optional limits (defaults 10, 20, 2). |
+
+### 2. Publish the page on Appwrite Sites
+
+Either connect the GitHub repository in the Appwrite Console (**Sites → Create site → Connect a repository**, root directory `public`, framework *Other*, no install or build command, output directory `./`), or use the CLI:
+
+```sh
+npm install -g appwrite-cli
+appwrite login
+# put your Appwrite project ID and endpoint into appwrite.config.json
+appwrite push sites --all
+```
+
+### 3. Point Supabase sign-in at the site
+
+Supabase dashboard → **Authentication → URL Configuration**: set **Site URL** to the Appwrite site's address and add it under **Redirect URLs**, so confirmation emails link back to the app. Supabase's built-in email sender only allows a few emails an hour; for real use, add your own SMTP server under **Authentication → Emails**.
+
+## Development
+
+```sh
+npm install        # installs Deno locally
+npm test           # Edge Function tests (in-memory database, local stand-ins for the APIs)
+npm run check      # type-check the function
+npm run serve      # serve public/ at http://localhost:8000 against the live Supabase project
+```
+
+To deploy changes with the Supabase CLI: `supabase link --project-ref pbipjfwhdrlktlzgstxw`, then `supabase db push` and `supabase functions deploy api`.
+
+## Limits to know
+
+- On Supabase's free plan an Edge Function's background work is cut off after about 150 seconds. Long songs, or a slow music service, may not finish. The page marks a song still pending after 10 minutes as failed.
+- MiniMax support was written from memory of its API and has only been tested against a stand-in.
+- The previous self-hosted Node.js version is in this repository's history (commit `1170786`).
